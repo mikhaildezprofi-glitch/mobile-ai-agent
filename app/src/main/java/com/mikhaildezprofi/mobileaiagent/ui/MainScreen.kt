@@ -52,6 +52,7 @@ fun MainScreen() {
     var mode by remember { mutableStateOf(AgentMode.LOCAL) }
     var status by remember { mutableStateOf("Инициализация локального движка llama.cpp…") }
     var diagnostics by remember { mutableStateOf(false) }
+    var diagnosticDetails by remember { mutableStateOf("") }
     var engine by remember { mutableStateOf<InferenceEngine?>(null) }
     var modelReady by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -117,7 +118,20 @@ fun MainScreen() {
                 status = "Модель Qwen3-1.7B загружена. Можно общаться офлайн."
             } catch (error: Exception) {
                 modelReady = false
-                status = "Ошибка загрузки модели: ${error.message ?: error.javaClass.simpleName}"
+                status = "Ошибка загрузки модели: ${error.javaClass.simpleName}: ${error.message ?: "без сообщения"}"
+                diagnosticDetails = buildString {
+                    appendLine("Класс ошибки: ${error.javaClass.name}")
+                    appendLine("Сообщение: ${error.message ?: "отсутствует"}")
+                    var cause = error.cause
+                    var depth = 1
+                    while (cause != null && depth <= 10) {
+                        appendLine("Причина $depth: ${cause.javaClass.name}: ${cause.message ?: "без сообщения"}")
+                        cause = cause.cause
+                        depth++
+                    }
+                    appendLine()
+                    append(error.stackTraceToString())
+                }.take(12000)
             } finally {
                 busy = false
             }
@@ -292,6 +306,12 @@ fun MainScreen() {
             }
             if (diagnostics) {
                 Text("Версия 0.2.0 • llama.cpp • GGUF • Android arm64-v8a")
+                Text(
+                    if (diagnosticDetails.isBlank())
+                        "Подробности ошибки появятся здесь после сбоя загрузки."
+                    else diagnosticDetails,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
             Spacer(Modifier.height(8.dp))
         }
