@@ -39,6 +39,12 @@ android {
             jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
         }
     }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     buildFeatures { compose = true }
 }
 
