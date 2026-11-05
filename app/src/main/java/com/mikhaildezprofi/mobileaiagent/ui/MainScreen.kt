@@ -1,6 +1,8 @@
 package com.mikhaildezprofi.mobileaiagent.ui
 
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -312,6 +314,18 @@ fun MainScreen() {
                     else diagnosticDetails,
                     style = MaterialTheme.typography.bodySmall
                 )
+                        OutlinedButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(
+                                    ClipData.newPlainText("Диагностика MOBILE AI AGENT", diagnosticDetails)
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = diagnosticDetails.isNotBlank()
+                        ) {
+                            Text("Скопировать диагностику")
+                        }
             }
             Spacer(Modifier.height(8.dp))
         }
