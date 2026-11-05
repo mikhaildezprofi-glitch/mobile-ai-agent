@@ -47,6 +47,9 @@ jobs:
           sdkmanager "platforms;android-36" "ndk;29.0.13113456" "cmake;3.31.6"
           sed -i 's/listOf("arm64-v8a", "x86_64")/listOf("arm64-v8a")/' third_party/llama.cpp/examples/llama.android/lib/build.gradle.kts
 
+      - name: Patch llama.cpp native diagnostics
+        run: python3 scripts/patch-llama-diagnostics.py
+
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
