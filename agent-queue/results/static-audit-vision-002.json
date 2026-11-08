@@ -1,0 +1,64 @@
+{
+  "task_id": "static-audit-vision-002",
+  "action": "static_audit",
+  "status": "completed",
+  "executed_at": "2026-11-08T19:54:18.270419+00:00",
+  "executor": "Termux local allowlist worker",
+  "checks": {
+    "monitor_shell_syntax": {
+      "exit_code": 0,
+      "output": ""
+    },
+    "cloud_queue_shell_syntax": {
+      "exit_code": 0,
+      "output": ""
+    },
+    "build_wrapper_syntax": {
+      "exit_code": 0,
+      "output": ""
+    },
+    "git_diff_check": {
+      "exit_code": 0,
+      "output": ""
+    },
+    "vision_readiness_references": [
+      [
+        274,
+        "var visionReady by remember { mutableStateOf(false) }"
+      ],
+      [
+        310,
+        "LaunchedEffect(engine, modelReady, visionRevision) {"
+      ],
+      [
+        312,
+        "visionReady = if (modelReady && visionEngine != null) {"
+      ],
+      [
+        417,
+        "vision.loadVisionProjector(projector.absolutePath)"
+      ],
+      [
+        488,
+        "vision.loadVisionProjector(modelFile.absolutePath)"
+      ],
+      [
+        510,
+        "vision.loadVisionProjector(projector.absolutePath)"
+      ],
+      [
+        749,
+        "val visionReady = hasVisualAttachments && visionEngine?.isVisionReady() == true"
+      ],
+      [
+        751,
+        "if (visionReady) {"
+      ],
+      [
+        1160,
+        "visionReady = visionReady"
+      ]
+    ]
+  },
+  "all_checks_passed": true
+}
