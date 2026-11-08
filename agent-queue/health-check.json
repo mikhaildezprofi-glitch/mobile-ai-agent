@@ -1,0 +1,6 @@
+{
+  "task_id": "initial-health-check",
+  "action": "repository_health_check",
+  "created_by": "termux-monitor",
+  "project": "MOBILE_AI_AGENT"
+}
