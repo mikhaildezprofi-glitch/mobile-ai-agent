@@ -7,7 +7,7 @@
 - native diagnostic capture exposed to Kotlin;
 - sampler and token-position fixes used by the device build.
 
-`VisionInferenceEngine.kt` adds the optional Kotlin capability interface. `libomp.so` is copied into the Android module's `jniLibs/arm64-v8a` directory so the OpenMP dependency is packaged at runtime.
+`VisionInferenceEngine.kt` adds the optional Kotlin capability interface. The upstream CMake build produces `libomp.so` as part of the native output; do not copy another `libomp.so` into `jniLibs`, or Android Gradle Plugin will report a duplicate native library.
 
 The GitHub Actions workflow applies this patch to a fresh checkout of the pinned upstream revision. It deliberately keeps the upstream Android Gradle file's CMake build configuration; the phone's local Gradle file had disabled CMake because it used locally built prebuilt libraries.
 
