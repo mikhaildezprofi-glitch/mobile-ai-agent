@@ -73,8 +73,20 @@ jobs:
           PY
           echo "count=$(python3 -c 'import json; print(len(json.load(open("triage_input.json"))))')" >> "$GITHUB_OUTPUT"
 
+      - name: Check whether Gemini is configured
+        id: secret_check
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        shell: bash
+        run: |
+          if [[ -n "$GEMINI_API_KEY" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Record that Gemini is not configured
-        if: ${{ secrets.GEMINI_API_KEY == '' }}
+        if: ${{ steps.secret_check.outputs.configured == 'false' }}
         shell: bash
         run: |
           {
@@ -87,7 +99,7 @@ jobs:
           } > triage-status.md
 
       - name: Analyze sanitized status with Gemini
-        if: ${{ secrets.GEMINI_API_KEY != '' && steps.prepare.outputs.count != '0' }}
+        if: ${{ steps.secret_check.outputs.configured == 'true' && steps.prepare.outputs.count != '0' }}
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: gemini-2.5-flash
