@@ -1,0 +1,6 @@
+{
+  "task_id": "initial-local-status",
+  "action": "collect_project_status",
+  "requested_by": "chatgpt",
+  "created_at": "2026-11-09T00:00:00+05:00"
+}
