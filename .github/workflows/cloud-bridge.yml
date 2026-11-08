@@ -4,8 +4,8 @@ on:
   push:
     branches: [agent-queue]
     paths:
-      - 'agent-queue/**/*.json'
-      - 'agent-queue/*.json'
+      - 'agent-queue/event-*.json'
+      - 'agent-queue/commands/*.json'
   workflow_dispatch:
     inputs:
       task_file:
@@ -28,7 +28,7 @@ jobs:
       - name: Checkout task and project
         uses: actions/checkout@v4
 
-      - name: Validate and execute safe task
+      - name: Validate task and cloud project
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -57,15 +57,22 @@ jobs:
           for file in "${files[@]}"; do
             [[ -f "$file" ]] || { echo "Missing task file: $file"; exit 1; }
             python3 -m json.tool "$file" >/dev/null
-            action="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("action",""))' "$file")"
+            task_action="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("action",""))' "$file")"
+            task_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("task_id",""))' "$file")"
             echo "## Task: $file" >> report.md
-            echo "- Action: $action" >> report.md
-            case "$action" in
+            echo "- Task ID: $task_id" >> report.md
+            echo "- Action: $task_action" >> report.md
+            case "$task_action" in
               repository_health_check)
                 test -f settings.gradle.kts
                 test -f app/build.gradle.kts
-                test -f gradlew || test -f gradle/wrapper/gradle-wrapper.properties
+                test -f gradle/wrapper/gradle-wrapper.properties || test -f gradlew
+                test -f app/src/main/java/com/mikhaildezprofi/mobileaiagent/ui/MainScreen.kt
                 echo "- Result: repository structure check passed" >> report.md
+                ;;
+              collect_project_status|static_audit)
+                [[ "$file" == agent-queue/commands/*.json ]] || { echo "Local-only action must be in commands/" >&2; exit 2; }
+                echo "- Result: command schema accepted; Termux worker is responsible for local execution" >> report.md
                 ;;
               *)
                 echo "- Result: rejected; unsupported action" >> report.md
