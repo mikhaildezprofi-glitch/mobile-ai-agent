@@ -1,0 +1,85 @@
+name: MOBILE AI Agent Cloud Bridge
+
+on:
+  push:
+    branches: [agent-queue]
+    paths:
+      - 'agent-queue/**/*.json'
+      - 'agent-queue/*.json'
+  workflow_dispatch:
+    inputs:
+      task_file:
+        description: Queue JSON file to inspect
+        required: true
+        default: agent-queue/health-check.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ai-agent-cloud-bridge
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout task and project
+        uses: actions/checkout@v4
+
+      - name: Validate and execute safe task
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_FILE: ${{ inputs.task_file }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            files=("$INPUT_FILE")
+          else
+            mapfile -t files < <(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" | awk 'index($0, "agent-queue/") == 1 && $0 ~ /[.]json$/ {print}')
+          fi
+          if [[ "${#files[@]}" -eq 0 ]]; then
+            echo "No task JSON files found in this event." | tee report.md
+            exit 0
+          fi
+          {
+            echo "# MOBILE AI Agent cloud report"
+            echo
+            echo "- Event: $EVENT_NAME"
+            echo "- Commit: $CURRENT_SHA"
+            echo "- Runner: ubuntu-latest"
+            echo
+          } > report.md
+          for file in "${files[@]}"; do
+            [[ -f "$file" ]] || { echo "Missing task file: $file"; exit 1; }
+            python3 -m json.tool "$file" >/dev/null
+            action="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("action",""))' "$file")"
+            echo "## Task: $file" >> report.md
+            echo "- Action: $action" >> report.md
+            case "$action" in
+              repository_health_check)
+                test -f settings.gradle.kts
+                test -f app/build.gradle.kts
+                test -f gradlew || test -f gradle/wrapper/gradle-wrapper.properties
+                echo "- Result: repository structure check passed" >> report.md
+                ;;
+              *)
+                echo "- Result: rejected; unsupported action" >> report.md
+                exit 2
+                ;;
+            esac
+            echo >> report.md
+          done
+          cat report.md
+
+      - name: Upload execution report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-ai-agent-cloud-report
+          path: report.md
+          if-no-files-found: error
+          retention-days: 7
