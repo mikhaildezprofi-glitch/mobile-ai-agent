@@ -1,0 +1,16 @@
+{
+  "task_id": "20261108T205147Z-9696",
+  "action": "repository_health_check",
+  "project": "MOBILE_AI_AGENT",
+  "device_state": "INSTALLED_LAUNCHED_NO_FATAL",
+  "created_by": "termux-monitor",
+  "version_code": 20,
+  "version_name": "0.3.8-debug",
+  "installed_at": "2026-11-09T01:02:31+05:00",
+  "launch": "success",
+  "fatal_exception": "none in sampled logcat",
+  "thermal_status": "Thermal Status: 1",
+  "battery_percent": 43,
+  "battery_temperature_c": 39.4,
+  "next_step": "Verify model switching and vision readiness; no heavy inference yet"
+}
