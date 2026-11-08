@@ -1,6 +1,10 @@
 name: MOBILE AI Agent Hourly Device Watchdog
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/device-watchdog.yml'
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
