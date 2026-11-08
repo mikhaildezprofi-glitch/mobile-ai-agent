@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-11-08T20:47:39+00:00",
+  "checked_at": "2026-11-08T20:53:37+00:00",
   "termux_worker_running": true,
   "monitor_running": true,
-  "wifi_connected": false,
-  "network_interface": "unknown",
+  "wifi_connected": true,
+  "network_interface": "wifi",
   "adb_connected": true,
   "adb_state": "device",
   "project_accessible": true,
