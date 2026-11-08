@@ -104,7 +104,7 @@ jobs:
         if: ${{ steps.secret_check.outputs.configured == 'true' && steps.prepare.outputs.count != '0' }}
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-2.5-flash
+          GEMINI_MODEL: gemini-3.8-flash
         shell: bash
         run: |
           set -euo pipefail
@@ -126,7 +126,7 @@ jobs:
           """ + json.dumps(events, ensure_ascii=False)
           payload = {
               "contents": [{"parts": [{"text": prompt}]}],
-              "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
+              "generationConfig": {"responseMimeType": "application/json"}
           }
           url = "https://generativelanguage.googleapis.com/v1beta/models/" + os.environ["GEMINI_MODEL"] + ":generateContent?key=" + os.environ["GEMINI_API_KEY"]
           req = urllib.request.Request(
@@ -136,12 +136,27 @@ jobs:
           try:
               with urllib.request.urlopen(req, timeout=75) as response:
                   data = json.loads(response.read().decode("utf-8"))
-          except Exception:
-              # Do not print request URL, response body, or any credential-bearing details.
+          except urllib.error.HTTPError as exc:
+              # Record only HTTP status and provider status code; never log the key or response body.
+              api_status = "UNKNOWN"
+              try:
+                  error_data = json.loads(exc.read().decode("utf-8"))
+                  api_status = str(error_data.get("error", {}).get("status", "UNKNOWN"))[:80]
+              except Exception:
+                  pass
               pathlib.Path("triage-status.md").write_text(
-                  "# Gemini AI triage\n\nStatus: **request failed**. Details were suppressed to protect credentials.\n",
+                  f"# Gemini AI triage\n\nStatus: **request failed**\n\nHTTP: `{exc.code}`\n\nProvider status: `{api_status}`\n",
                   encoding="utf-8"
               )
+              print(f"Gemini API returned HTTP {exc.code} ({api_status}).")
+              raise SystemExit(1)
+          except Exception as exc:
+              error_type = type(exc).__name__
+              pathlib.Path("triage-status.md").write_text(
+                  f"# Gemini AI triage\n\nStatus: **request failed**\n\nClient error: `{error_type}`\n",
+                  encoding="utf-8"
+              )
+              print(f"Gemini request failed: {error_type}.")
               raise SystemExit(1)
           try:
               raw = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -172,6 +187,7 @@ jobs:
           PY
 
       - name: Upload triage report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mobile-ai-agent-gemini-triage
