@@ -51,8 +51,9 @@ jobs:
 
       - name: Apply device-tested Android native engine patch
         run: |
-          git -C third_party/llama.cpp apply --check patches/llama.cpp/android-engine.patch
-          git -C third_party/llama.cpp apply patches/llama.cpp/android-engine.patch
+          PATCH_FILE="$GITHUB_WORKSPACE/patches/llama.cpp/android-engine.patch"
+          git -C third_party/llama.cpp apply --check "$PATCH_FILE"
+          git -C third_party/llama.cpp apply "$PATCH_FILE"
           install -D patches/llama.cpp/VisionInferenceEngine.kt third_party/llama.cpp/examples/llama.android/lib/src/main/java/com/arm/aichat/VisionInferenceEngine.kt
           install -D patches/llama.cpp/libomp.so third_party/llama.cpp/examples/llama.android/lib/src/main/jniLibs/arm64-v8a/libomp.so
           git -C third_party/llama.cpp diff --check
