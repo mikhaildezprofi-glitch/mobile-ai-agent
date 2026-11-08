@@ -97,6 +97,8 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const marker = '<!-- mobile-ai-device-watchdog -->';
+            const blockerSignature = blockers.slice().sort().join(' | ');
+            const blockerMarker = '<!-- blockers:' + blockerSignature + ' -->';
             const title = '[MOBILE AI] Требуется восстановить связь с телефоном';
             const openIssues = await github.rest.issues.listForRepo({
               owner, repo, state: 'open', per_page: 100
@@ -121,6 +123,7 @@ jobs:
 
             const body = [
               marker,
+              blockerMarker,
               'Облачный монитор обнаружил, что ожидающая задача требует недоступный канал телефона.',
               '',
               '## Причина',
@@ -142,11 +145,15 @@ jobs:
             if (blockers.length) {
               if (existing) {
                 if (existing.body !== body) {
+                  const previousMarker = (existing.body || '').match(/<!-- blockers:(.*?) -->/);
+                  const previousSignature = previousMarker ? previousMarker[1] : '';
                   await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
-                  await github.rest.issues.createComment({
-                    owner, repo, issue_number: existing.number,
-                    body: '@' + owner + ' Обнаружено обновление состояния: ' + blockers.join('; ')
-                  });
+                  if (previousSignature !== blockerSignature) {
+                    await github.rest.issues.createComment({
+                      owner, repo, issue_number: existing.number,
+                      body: '@' + owner + ' Изменился набор недоступных каналов: ' + blockers.join('; ')
+                    });
+                  }
                 }
               } else {
                 await github.rest.issues.create({
