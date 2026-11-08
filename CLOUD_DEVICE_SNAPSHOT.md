@@ -13,11 +13,11 @@ This branch snapshots the current Samsung device worktree and transfers the nati
 
 ## Still local by design
 - Model weights (`models/` and the separate Qwen GGUF), because they are needed for on-device inference and are large.
-- The full `third_party/llama.cpp` checkout. It contains 5 meaningful modified Android engine files and 6 untracked files. The patch and rollback files are now archived here, but the checkout stays on the phone until the cloud build passes and we confirm it can be recreated from the pinned upstream commit.
+- The full `third_party/llama.cpp` checkout has now been removed from the phone after its five meaningful Android engine changes, vision interface, and rollback files were transferred into this branch. The phone retains only `third_party/README.md` with restore instructions. This shifts native source compilation to GitHub Actions; restore the pinned upstream source plus patch only if a local build is needed.
 - `local.properties`, runtime status files and local caches.
 
 ## Build dependency
 
 `.github/workflows/android-build.yml` checks out `ggml-org/llama.cpp` at `3de52ac38818978d6da8f386eda43a856e53714a`, applies `patches/llama.cpp/android-engine.patch`, installs the vision interface and `libomp.so`, then builds the APK on GitHub Actions. The workflow filters push/PR events to source and build files, and stores APK artifacts for 90 days. The snapshot branch is included in the workflow's push trigger.
 
-The retained installer APK is byte-identical to the APK formerly in `app/build/outputs/apk/debug/` and `/Download/MOBILE_AI_AGENT.apk`. Generated `app/build/`, Gradle/Kotlin caches and one duplicate APK were removed; source files remain intact.
+The retained installer APK is byte-identical to the APK formerly in `app/build/outputs/apk/debug/` and `/Download/MOBILE_AI_AGENT.apk`. Generated `app/build/`, the 479 MB local llama.cpp checkout, Gradle/Kotlin caches, duplicate APKs, and local rollback copies were removed after cloud archival. Model weights remain local for offline inference.
