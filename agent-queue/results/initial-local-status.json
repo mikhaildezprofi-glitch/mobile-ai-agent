@@ -1,0 +1,39 @@
+{
+  "task_id": "initial-local-status",
+  "action": "collect_project_status",
+  "status": "completed",
+  "executed_at": "2026-11-08T19:51:23.191492+00:00",
+  "executor": "Termux local allowlist worker",
+  "build_status": {
+    "project": "MOBILE_AI_AGENT",
+    "state": "INSTALLED_LAUNCHED_NO_FATAL",
+    "version_code": 20,
+    "version_name": "0.3.8-debug",
+    "apk_sha256": "77f8cb4c26233089da49b0d97a39e7d4ee97e95c823578911c0312e5b41957c2",
+    "installed_at": "2026-11-09T00:21:33+05:00",
+    "launch": "success",
+    "fatal_exception": "none in sampled logcat",
+    "thermal_status": 0,
+    "ap_temperature_c": 47.8,
+    "pa_temperature_c": 48.2,
+    "battery_temperature_c": 37.6,
+    "battery_percent": 15,
+    "next_step": "Continue functional tests; charge phone before heavy inference"
+  },
+  "live_status": {
+    "project": "MOBILE_AI_AGENT",
+    "state": "INSTALLED_LAUNCHED_NO_FATAL",
+    "checked_at": "2026-11-09T00:51:05+05:00",
+    "free_ram_mb": 2371,
+    "battery_temperature_c": "37.6",
+    "thermal": "Thermal Status: 0 ",
+    "load": "n/a"
+  },
+  "apk": {
+    "exists": true,
+    "bytes": 81380632
+  },
+  "git_branch": "agent-queue",
+  "tracked_changes": [],
+  "recent_monitor_log": "[2026-11-09 00:15:47] Monitor started\n[2026-11-09 00:15:55] BUILD_ACTIVE load=n/a mem=1687 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.8, \n[2026-11-09 00:16:21] BUILD_ACTIVE load=n/a mem=2769 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9, \n[2026-11-09 00:16:42] BUILD_NOT_DETECTED idle_samples=1 load=n/a mem=2766 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9,  apk=1794165379:81380632\n[2026-11-09 00:17:00] BUILD_NOT_DETECTED idle_samples=2 load=n/a mem=2179 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9,  apk=1794165379:81380632\n[2026-11-09 00:17:19] BUILD_NOT_DETECTED idle_samples=3 load=n/a mem=2232 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9,  apk=1794165379:81380632\n[2026-11-09 00:17:19] ALERT Сборка завершилась, APK изменился. Нужно проверить BUILD SUCCESSFUL/FAILED.\n[2026-11-09 00:17:41] BUILD_NOT_DETECTED idle_samples=4 load=n/a mem=2082 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9,  apk=1794165379:81380632\n[2026-11-09 00:17:59] BUILD_NOT_DETECTED idle_samples=5 load=n/a mem=2186 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9,  apk=1794165379:81380632\n[2026-11-09 00:18:17] BUILD_NOT_DETECTED idle_samples=6 load=n/a mem=2167 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9,  apk=1794165379:81380632\n[2026-11-09 00:18:35] BUILD_NOT_DETECTED idle_samples=7 load=n/a mem=2110 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9,  apk=1794165379:81380632\n[2026-11-09 00:18:53] BUILD_NOT_DETECTED idle_samples=8 load=n/a mem=2148 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9,  apk=1794165379:81380632\n[2026-11-09 00:19:11] BUILD_NOT_DETECTED idle_samples=9 load=n/a mem=2199 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9,  apk=1794165379:81380632\n[2026-11-09 00:19:30] BUILD_NOT_DETECTED idle_samples=10 load=n/a mem=2176 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9,  apk=1794165379:81380632\n[2026-11-09 00:19:48] BUILD_NOT_DETECTED idle_samples=11 load=n/a mem=2187 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.9,  apk=1794165379:81380632\n[2026-11-09 00:20:06] BUILD_NOT_DETECTED idle_samples=12 load=n/a mem=2183 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.3,  apk=1794165379:81380632\n[2026-11-09 00:20:24] BUILD_NOT_DETECTED idle_samples=13 load=n/a mem=2198 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.3,  apk=1794165379:81380632\n[2026-11-09 00:20:42] BUILD_NOT_DETECTED idle_samples=14 load=n/a mem=2171 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.3,  apk=1794165379:81380632\n[2026-11-09 00:21:00] BUILD_NOT_DETECTED idle_samples=15 load=n/a mem=2143 MB adb=0    \"health\": \"GOOD\",   \"temperature\": 37.3,  apk=1794165379:81380632\n[2026-11-09 00:21:14] Monitor v2 started\n[2026-11-09T00:21:14+05:00] STATE=BUILD_SUCCESS Состояние: BUILD_SUCCESS. RAM: 2198 MB. Батарея: 37.1 C.\n[2026-11-09T00:22:13+05:00] STATE=INSTALLED_LAUNCHED_NO_FATAL Состояние: INSTALLED_LAUNCHED_NO_FATAL. RAM: 2279 MB. Батарея: 38.8 C.\n[2026-11-09 00:45:29] Cloud event queued: BUILD_SUCCESS (20261108T194524Z-28253)\n[2026-11-09 00:45:47] Monitor v3 started\n[2026-11-09T00:45:47+05:00] STATE=INSTALLED_LAUNCHED_NO_FATAL Состояние: INSTALLED_LAUNCHED_NO_FATAL. RAM: 2407 MB. Батарея: 37.7 C.\nFrom github.com:mikhaildezprofi-glitch/mobile-ai-agent\n * branch            agent-queue -> FETCH_HEAD\nHEAD is now at 8a7e314 Queue device event BUILD_SUCCESS\n[agent-queue a4a6d3a] Queue device event INSTALLED_LAUNCHED_NO_FATAL\n 1 file changed, 16 insertions(+)\n create mode 100644 agent-queue/event-20261108T194556Z-28561.json\nTo github.com:mikhaildezprofi-glitch/mobile-ai-agent.git\n   8a7e314..a4a6d3a  HEAD -> agent-queue\n[2026-11-09 00:46:00] Cloud event queued: INSTALLED_LAUNCHED_NO_FATAL (20261108T194556Z-28561)\n"
+}
