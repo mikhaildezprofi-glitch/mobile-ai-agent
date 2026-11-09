@@ -15,7 +15,9 @@ on:
       - 'patches/llama.cpp/android-engine.patch'
       - 'patches/llama.cpp/VisionInferenceEngine.kt'
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
+      - snapshot/device-worktree-20261109
     paths:
       - '.github/workflows/android-build.yml'
       - 'app/**'
