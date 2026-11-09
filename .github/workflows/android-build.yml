@@ -33,11 +33,19 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: mobile-ai-android-build-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
+    name: Validate, test and build APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
       - name: Checkout MOBILE AI AGENT
         uses: actions/checkout@v4
@@ -80,12 +88,12 @@ jobs:
           install -D patches/llama.cpp/VisionInferenceEngine.kt third_party/llama.cpp/examples/llama.android/lib/src/main/java/com/arm/aichat/VisionInferenceEngine.kt
           git -C third_party/llama.cpp diff --check
 
-      - name: Run Android lint, unit-test task and build debug APK
+      - name: Run lint, unit tests and build debug APK in sequence
         run: |
-          gradle --no-daemon --stacktrace \
-            :app:lintDebug \
-            :app:testDebugUnitTest \
-            :app:assembleDebug
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :app:lintDebug
+          gradle --no-daemon --stacktrace :app:testDebugUnitTest
+          gradle --no-daemon --stacktrace :app:assembleDebug
 
       - name: Generate APK checksum
         shell: bash
@@ -117,12 +125,26 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  release:
+    name: Publish verified APK release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download APK artifact from successful build
+        uses: actions/download-artifact@v4
+        with:
+          name: mobile-ai-agent-debug-apk
+          path: release-assets
+
       - name: Publish tagged APK to GitHub Releases
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: MOBILE AI AGENT ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/debug/*.apk.sha256
+            release-assets/*.apk
+            release-assets/*.apk.sha256
