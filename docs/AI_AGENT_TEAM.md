@@ -6,6 +6,7 @@ The repository contains reusable GitHub Copilot custom-agent profiles:
 
 | Profile | Responsibility |
 |---|---|
+| Agent Coordinator | Breaks work into dependent tasks, assigns specialist profiles, and tracks verified handoffs |
 | Android Engineer | Kotlin, Compose, Android lifecycle and permissions |
 | AI Runtime Engineer | llama.cpp, GGUF, JNI/NDK and native runtime |
 | Cloud Build Engineer | GitHub Actions, build pipeline and artifacts |
@@ -15,6 +16,9 @@ The repository contains reusable GitHub Copilot custom-agent profiles:
 Profiles are stored in `.github/agents/*.agent.md` and become available in supported GitHub Copilot agent surfaces after the files are merged into the repository's default branch and the account/repository has coding-agent access enabled.
 
 ## Safe execution protocol
+
+The Agent Coordinator is the entry point for decomposing a larger request. It may delegate independent analysis to specialist profiles, but shared-file edits and dependent build/test stages remain sequential. It must stop when an agent, permission, or service is unavailable rather than fabricate completion.
+
 
 1. Create a focused GitHub issue with acceptance criteria.
 2. Assign one coding agent to one implementation task.
