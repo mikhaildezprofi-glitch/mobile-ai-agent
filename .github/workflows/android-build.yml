@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - snapshot/device-worktree-20261109
+      - cloud/quality-gates-20261109
     paths:
       - '.github/workflows/android-build.yml'
       - 'app/**'
