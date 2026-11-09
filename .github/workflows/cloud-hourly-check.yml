@@ -1,0 +1,80 @@
+name: MOBILE AI Agent Hourly Cloud Check
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: mobile-ai-hourly-cloud-check
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Inspect pipeline and task queue
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout task queue
+        uses: actions/checkout@v4
+        with:
+          ref: agent-queue
+          path: task-queue
+          fetch-depth: 1
+
+      - name: Check recent build runs and pending queue items
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branches = ['cloud/quality-gates-20261109', 'snapshot/device-worktree-20261109'];
+            const failures = [];
+            for (const branch of branches) {
+              const result = await github.rest.actions.listWorkflowRuns({ owner, repo, workflow_id: 'android-build.yml', branch, per_page: 5 });
+              const runs = result.data.workflow_runs;
+              const active = runs.filter(run => ['queued', 'in_progress', 'waiting', 'requested'].includes(run.status));
+              if (active.length > 1) failures.push(branch + ': ' + active.length + ' overlapping Android build runs');
+              for (const run of runs) {
+                if (['failure', 'timed_out', 'cancelled'].includes(run.conclusion)) {
+                  failures.push(branch + ': ' + run.name + ' #' + run.run_number + ' ' + run.conclusion + ' (' + run.html_url + ')');
+                  break;
+                }
+              }
+            }
+            const queueDir = path.join('task-queue', 'agent-queue', 'commands');
+            const resultsDir = path.join('task-queue', 'agent-queue', 'results');
+            const pending = [];
+            if (fs.existsSync(queueDir)) {
+              for (const name of fs.readdirSync(queueDir).filter(n => n.endsWith('.json')).sort()) {
+                const file = path.join(queueDir, name);
+                try {
+                  const task = JSON.parse(fs.readFileSync(file, 'utf8'));
+                  const id = String(task.task_id || name.replace(/\\.json$/, ''));
+                  if (!fs.existsSync(path.join(resultsDir, id + '.json'))) pending.push({ id, action: task.action || 'unknown' });
+                } catch (error) { failures.push('Invalid queue item ' + name + ': ' + error.message); }
+              }
+            }
+            core.summary.addHeading('MOBILE AI AGENT hourly check');
+            core.summary.addRaw('Checked at ' + new Date().toISOString() + '\n\n');
+            core.summary.addHeading('Pending device tasks');
+            core.summary.addRaw(pending.length ? pending.map(t => '- ' + t.id + ': ' + t.action).join('\n') : 'No pending device tasks');
+            core.summary.addHeading('Pipeline issues');
+            core.summary.addRaw(failures.length ? failures.map(x => '- ' + x).join('\n') : 'No recent pipeline failures or overlapping runs');
+            await core.summary.write();
+            if (failures.length) {
+              const title = '[MOBILE AI AGENT] Hourly cloud check found a blocker';
+              const body = 'Automated hourly check found issues at ' + new Date().toISOString() + ':\n\n' + failures.map(x => '- ' + x).join('\n') + '\n\nPending queue items: ' + (pending.length ? pending.map(t => t.id + ' (' + t.action + ')').join(', ') : 'none');
+              const existing = await github.rest.issues.listForRepo({ owner, repo, state: 'open', per_page: 100 });
+              const issue = existing.data.find(item => !item.pull_request && item.title === title);
+              if (!issue) await github.rest.issues.create({ owner, repo, title, body });
+              else await github.rest.issues.update({ owner, repo, issue_number: issue.number, body });
+              core.setFailed('Hourly check found a pipeline blocker. See the tracking issue.');
+            }
