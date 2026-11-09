@@ -2,6 +2,8 @@
 
 ## Current roles
 
+See [AI_AGENT_ROLLOUT_PLAN.md](AI_AGENT_ROLLOUT_PLAN.md) for the staged activation plan and the currently verified execution boundaries.
+
 The repository contains reusable GitHub Copilot custom-agent profiles:
 
 | Profile | Responsibility |
@@ -31,7 +33,7 @@ The Agent Coordinator is the entry point for decomposing a larger request. It ma
 ## Important limitations
 
 - A custom profile is a role definition, not a running agent or an automatic worker.
-- The hourly cloud check is monitoring only; it does not dispatch coding agents.
+- The hourly device watchdog is monitoring only; it does not dispatch coding agents.
 - The Gemini triage workflow is diagnostics-only and requires the repository secret `GEMINI_API_KEY`; it does not edit code.
 - The existing queue bridge validates events and does not itself execute an AI coding agent.
 - Copilot, Claude, or Codex cloud-agent availability depends on the account plan and repository policy.
