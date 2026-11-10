@@ -39,7 +39,7 @@ android-debug-apk:
     - unzip -q /tmp/android-tools.zip -d /tmp/android-tools
     - mv /tmp/android-tools/cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
     - export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
-    - yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null
+    - yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null || { sdk_status=${PIPESTATUS[1]}; test "$sdk_status" -eq 0; }
     - sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.13113456" "cmake;3.31.6"
     - git clone https://github.com/ggml-org/llama.cpp.git third_party/llama.cpp
     - git -C third_party/llama.cpp checkout 3de52ac38818978d6da8f386eda43a856e53714a
