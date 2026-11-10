@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout event
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Prepare minimal sanitized input
         id: prepare
@@ -34,36 +36,22 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_FILE: ${{ inputs.event_file }}
           CURRENT_SHA: ${{ github.sha }}
-          EVENT_PATH: ${{ github.event_path }}
         run: |
           set -euo pipefail
-          python3 - "$EVENT_NAME" "$INPUT_FILE" "$EVENT_PATH" <<'PY'
-          import json, pathlib, re, sys
-          event_name, input_file, event_path = sys.argv[1:4]
-          if event_name == "workflow_dispatch":
-              names = [input_file]
-          else:
-              event = json.loads(pathlib.Path(event_path).read_text(encoding="utf-8"))
-              names = []
-              head = event.get("head_commit") or {}
-              names.extend(head.get("added", []))
-              names.extend(head.get("modified", []))
-              for commit in event.get("commits", []):
-                  names.extend(commit.get("added", []))
-                  names.extend(commit.get("modified", []))
-              names = list(dict.fromkeys(
-                  name for name in names
-                  if re.fullmatch(r"agent-queue/event-[^/]+[.]json", name)
-              ))
-          if not names:
-              raise SystemExit("No changed event JSON files were found in this push.")
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            files=("$INPUT_FILE")
+          else
+            mapfile -t files < <(git diff-tree --no-commit-id --name-only -r "$CURRENT_SHA" | grep -E '^agent-queue/event-[^/]+[.]json$' || true)
+          fi
+          python3 - "${files[@]}" <<'PY'
+          import json, pathlib, sys
           allowed = {
               "task_id", "action", "project", "device_state", "version_code",
               "version_name", "launch", "fatal_exception", "thermal_status",
               "battery_percent", "battery_temperature_c", "installed_at", "next_step"
           }
           events = []
-          for name in names[-8:]:
+          for name in sys.argv[1:]:
               path = pathlib.Path(name)
               if not path.is_file() or path.stat().st_size > 32768:
                   raise SystemExit(f"Rejected missing or oversized event: {name}")
