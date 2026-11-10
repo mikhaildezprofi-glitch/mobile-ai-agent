@@ -33,18 +33,13 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_FILE: ${{ inputs.event_file }}
-          BEFORE_SHA: ${{ github.event.before }}
           CURRENT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             files=("$INPUT_FILE")
           else
-            if [[ "$BEFORE_SHA" =~ ^0+$ ]]; then
-              mapfile -t files < <(git diff-tree --no-commit-id --name-only -r "$CURRENT_SHA" | grep -E '^agent-queue/event-[^/]+[.]json$' || true)
-            else
-              mapfile -t files < <(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" | grep -E '^agent-queue/event-[^/]+[.]json$' || true)
-            fi
+            mapfile -t files < <(git diff-tree --root --no-commit-id --name-only -r "$CURRENT_SHA" | grep -E '^agent-queue/event-[^/]+[.]json$' || true)
           fi
           python3 - "${files[@]}" <<'PY'
           import json, pathlib, sys
