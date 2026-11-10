@@ -1,20 +1,30 @@
 #!/usr/bin/env python3
-"""Read-only GitLab project health report for scheduled CI."""
+"""Read-only GitLab project and Android device health report."""
 import json
 import os
 import pathlib
+import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 
 PROJECT_ID = os.environ.get("CI_PROJECT_ID", "88757234")
 BASE = f"https://gitlab.com/api/v4/projects/{PROJECT_ID}"
 
-def get(path):
-    request = urllib.request.Request(
+def request(path):
+    req = urllib.request.Request(
         BASE + path,
         headers={"Accept": "application/json", "User-Agent": "mobile-ai-agent-monitor"}
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        return json.load(response)
+    with urllib.request.urlopen(req, timeout=20) as response:
+        return response.read()
+
+def get(path):
+    return json.loads(request(path))
+
+def get_raw_file(file_path, ref):
+    query = urllib.parse.urlencode({"ref": ref})
+    encoded_path = urllib.parse.quote(file_path, safe="")
+    return request(f"/repository/files/{encoded_path}/raw?{query}").decode("utf-8")
 
 def main():
     lines = ["# MOBILE AI AGENT hourly report", ""]
@@ -90,7 +100,7 @@ def main():
             counts[status] = counts.get(status, 0) + 1
         lines += [
             "",
-            "## Task queue",
+            "## Coding task queue",
             f"- Total: {len(tasks)}",
             f"- Status counts: {counts or 'empty'}"
         ]
@@ -100,13 +110,65 @@ def main():
                 f"**{task.get('status')}** · {task.get('title')}"
             )
     except Exception as exc:
-        lines += ["", "## Task queue", f"- ERROR: {type(exc).__name__}: {exc}"]
+        lines += ["", "## Coding task queue", f"- ERROR: {type(exc).__name__}: {exc}"]
+
+    # Preserve the existing Termux/ADB queue on its dedicated GitLab branch.
+    try:
+        heartbeat = json.loads(get_raw_file("agent-queue/device-heartbeat.json", "agent-queue"))
+        checked_at = datetime.fromisoformat(heartbeat["checked_at"].replace("Z", "+00:00"))
+        age_minutes = max(0, (datetime.now(timezone.utc) - checked_at).total_seconds() / 60)
+        fresh = age_minutes <= 75
+        commands = get("/repository/tree?" + urllib.parse.urlencode({
+            "path": "agent-queue/commands", "ref": "agent-queue", "per_page": 100
+        }))
+        results = get("/repository/tree?" + urllib.parse.urlencode({
+            "path": "agent-queue/results", "ref": "agent-queue", "per_page": 100
+        }))
+        result_names = {item["name"] for item in results}
+        pending = []
+        invalid = 0
+        for entry in commands:
+            if entry.get("type") != "blob" or not entry.get("name", "").endswith(".json"):
+                continue
+            try:
+                command = json.loads(get_raw_file(entry["path"], "agent-queue"))
+                task_id = str(command.get("task_id") or entry["name"][:-5])
+                if task_id + ".json" not in result_names:
+                    pending.append(command)
+            except Exception:
+                invalid += 1
+        needs_adb = any(item.get("requires_adb") is True for item in pending)
+        needs_wifi = any(item.get("requires_wifi") is True for item in pending)
+        termux_ok = fresh and heartbeat.get("termux_worker_running") is True
+        adb_ok = fresh and heartbeat.get("adb_connected") is True
+        wifi_ok = fresh and heartbeat.get("wifi_connected") is True
+        blockers = []
+        if pending and not termux_ok:
+            blockers.append("Termux worker unavailable")
+        if needs_adb and not adb_ok:
+            blockers.append("ADB unavailable")
+        if needs_wifi and not wifi_ok:
+            blockers.append("Wi-Fi unavailable")
+        lines += [
+            "",
+            "## Android device queue",
+            f"- Heartbeat: {'fresh' if fresh else 'stale'} (age {int(age_minutes)} min)",
+            f"- Pending device commands: {len(pending)}",
+            f"- Invalid command files: {invalid}",
+            f"- Termux worker: {'available' if termux_ok else 'not confirmed'}",
+            f"- ADB: {'available' if adb_ok else 'not confirmed'}",
+            f"- Wi-Fi: {'available' if wifi_ok else 'not confirmed'}",
+            f"- Blockers: {', '.join(blockers) if blockers else 'none'}"
+        ]
+    except Exception as exc:
+        lines += ["", "## Android device queue", f"- ERROR: {type(exc).__name__}: {exc}"]
 
     lines += [
         "",
         "## Verification rule",
         "- A running agent requires a `gitlab-ai-agent` worker job with status `running`.",
         "- A completed agent run requires a successful worker job and a matching agent branch/Draft MR.",
+        "- Device heartbeat status is separate from coding-agent activity.",
         "- The report is read-only; it does not dispatch tasks, edit files, or merge MRs."
     ]
     report = "\n".join(lines) + "\n"
