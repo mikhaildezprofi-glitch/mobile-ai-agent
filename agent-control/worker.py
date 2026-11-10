@@ -51,7 +51,7 @@ def main():
     env["GEMINI_API_KEY"] = api_key
     command = [
         "aider", "--model", "gemini/gemini-3.6-flash",
-        "--yes", "--no-auto-commits", "--message-file", prompt_path,
+        "--yes", "--no-auto-commits", "--map-tokens", "0", "--message-file", prompt_path,
         *allowed
     ]
     run(command, env=env)
