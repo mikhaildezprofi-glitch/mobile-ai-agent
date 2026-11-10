@@ -265,7 +265,9 @@ fun MainScreen() {
         mutableStateOf(if (geminiKeyStore.hasKey()) "Ключ сохранён в Android Keystore." else "Ключ не настроен.")
     }
 
-    var mode by remember { mutableStateOf(AgentMode.LOCAL) }
+    var mode by remember {
+        mutableStateOf(if (geminiKeyStore.hasKey()) AgentMode.HYBRID else AgentMode.LOCAL)
+    }
     var status by remember { mutableStateOf("Инициализация llama.cpp…") }
     var diagnostics by remember { mutableStateOf(false) }
     var diagnosticDetails by remember { mutableStateOf("") }
@@ -434,8 +436,14 @@ fun MainScreen() {
                     }
                 }
             }
+        } catch (error: LinkageError) {
+            engine = null
+            modelReady = false
+            status = "Нативный движок недоступен: ${error.message ?: error.javaClass.simpleName}. Гибридный режим остаётся доступен."
         } catch (error: Exception) {
-            status = "Ошибка инициализации: ${error.message ?: error.javaClass.simpleName}"
+            engine = null
+            modelReady = false
+            status = "Ошибка инициализации: ${error.message ?: error.javaClass.simpleName}. Гибридный режим остаётся доступен."
         }
     }
 
@@ -701,13 +709,26 @@ fun MainScreen() {
         busy = true
         status = "Модель генерирует ответ…"
 
-        val activeEngine = engine ?: return
+        val activeEngine = engine
         val coordinator = AgentCoordinator.forContext(appContext, activeEngine)
         val route = coordinator.route(
             prompt,
             hybridMode = mode == AgentMode.HYBRID && attached.isEmpty()
         )
         status = route.warning ?: route.reason
+        if (route.provider == AgentProviderKind.LOCAL && activeEngine == null) {
+            val message = "Локальный движок не инициализирован. Запросы без вложений доступны через Gemini в гибридном режиме при настроенном API-ключе; обработка вложений требует локального движка."
+            val index = messages.lastIndex
+            if (index >= 0 && messages[index].speaker == "MOBILE AI") {
+                messages[index] = messages[index].copy(text = message)
+            }
+            attached.forEach { attachment ->
+                attachment.bitmap?.let { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
+            }
+            busy = false
+            status = message
+            return
+        }
         try {
             ContextCompat.startForegroundService(
                 appContext,

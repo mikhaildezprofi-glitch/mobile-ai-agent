@@ -32,6 +32,14 @@ interface AgentModelProvider {
     fun generate(prompt: String, maxTokens: Int): Flow<String>
 }
 
+private object UnavailableLocalProvider : AgentModelProvider {
+    override val id: String = "llama.cpp / Qwen3"
+    override val isAvailable: Boolean = false
+    override fun generate(prompt: String, maxTokens: Int): Flow<String> = flow {
+        throw IllegalStateException("Нативный локальный движок не инициализирован.")
+    }
+}
+
 private class LocalLlamaProvider(
     private val engine: InferenceEngine
 ) : AgentModelProvider {
@@ -163,10 +171,10 @@ class AgentCoordinator(
         fun forLocalEngine(engine: InferenceEngine): AgentCoordinator =
             AgentCoordinator(LocalLlamaProvider(engine))
 
-        fun forContext(context: Context, engine: InferenceEngine): AgentCoordinator {
+        fun forContext(context: Context, engine: InferenceEngine?): AgentCoordinator {
             val keyStore = GeminiApiKeyStore(context.applicationContext)
             return AgentCoordinator(
-                local = LocalLlamaProvider(engine),
+                local = engine?.let(::LocalLlamaProvider) ?: UnavailableLocalProvider,
                 cloud = GeminiCloudProvider(keyStore)
             )
         }
