@@ -21,7 +21,7 @@ At the time this plan was prepared:
 - Queue: `agent-control/queue.json`.
 - Agent role prompts: `agent-control/roles/*.md`.
 - Coding executor: Aider running in a GitLab CI job.
-- Initial model: Gemini API Free, subject to free-tier quota and privacy limitations.
+- Initial model: Gemini 3.8 Flash through Gemini API Free, subject to free-tier quota and privacy limitations.
 - Monitoring: GitLab scheduled pipeline and `agent-control/monitor.py`.
 - Review: Draft Merge Requests, human approval, no agent self-merge.
 

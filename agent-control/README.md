@@ -5,7 +5,7 @@ GitLab is the primary development and orchestration platform. Copilot profiles a
 ## Executor
 
 - Aider is the open-source coding agent.
-- Gemini API Free is the initial model provider.
+- Model: Gemini 3.8 Flash through the Gemini API Free tier.
 - GitLab CI runs the agent in an isolated job.
 - Every task has a role, acceptance criteria, and a strict editable-path allowlist.
 - The agent can create a branch and Draft Merge Request, but cannot merge or write to `main`.

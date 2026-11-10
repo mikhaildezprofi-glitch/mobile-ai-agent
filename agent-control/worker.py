@@ -53,7 +53,7 @@ def main():
     env = os.environ.copy()
     env["GEMINI_API_KEY"] = api_key
     command = [
-        "aider", "--model", "gemini/gemini-3.6-flash",
+        "aider", "--model", "gemini/gemini-3.8-flash",
         "--yes", "--no-auto-commits", "--map-tokens", "0", "--no-gitignore", "--no-suggest-shell-commands", "--input-history-file", "/tmp/aider.input.history", "--chat-history-file", "/tmp/aider.chat.history.md", "--message-file", prompt_path,
         *allowed
     ]
