@@ -16,7 +16,7 @@ GitLab is the primary development and orchestration platform. Copilot profiles a
 Create these in **Settings → CI/CD → Variables**. Mark both Masked and Protected; do not put them in repository files.
 
 - `GEMINI_API_KEY`: Google AI Studio API key on the Free tier.
-- `GITLAB_AGENT_TOKEN`: project access token with `api` and `write_repository` scopes. Use the minimum role that can push branches and create Draft MRs.
+- `GITLAB_AGENT_TOKEN`: a GitLab Personal Access Token (PAT) with `api` and `write_repository` scopes. GitLab.com project access tokens require Premium, so use a PAT on the Free plan. Set an expiry date and store it only as a masked/protected CI variable.
 
 No billing account or card is required for the Gemini Free API tier when the account/project is eligible. Free-tier quotas can be limited and can change. Do not send secrets, personal data, signing material, private logs, or model files to the free API.
 

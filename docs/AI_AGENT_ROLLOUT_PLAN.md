@@ -14,7 +14,7 @@ Move all primary source development, builds, task coordination and agent executi
 ## Phase 1: activate the free coding executor
 
 - Add masked CI variable GEMINI_API_KEY using an eligible Google AI Studio Free API key.
-- Add masked CI variable GITLAB_AGENT_TOKEN using a project access token with api and write_repository scopes.
+- Add masked CI variable GITLAB_AGENT_TOKEN using a GitLab Personal Access Token (PAT) with api and write_repository scopes. GitLab.com project access tokens require Premium, so use a PAT on Free. Set an expiry date and never share the token in chat.
 - Keep credentials out of repository files, artifacts and logs.
 - Start one manual gitlab-ai-agent job from the protected default branch.
 - Verify the actual Aider worker job, dedicated branch and Draft Merge Request before marking the executor active.

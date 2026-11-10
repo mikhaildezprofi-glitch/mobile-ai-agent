@@ -41,7 +41,7 @@ Google's unpaid Gemini API terms permit submitted prompts and responses to be us
 
 1. Review this migration branch and its source tree.
 2. Verify the GitLab Android build on a Merge Request pipeline.
-3. Add masked/protected `GEMINI_API_KEY` and `GITLAB_AGENT_TOKEN` variables.
+3. Add masked/protected `GEMINI_API_KEY` and `GITLAB_AGENT_TOKEN` variables. `GITLAB_AGENT_TOKEN` must be a GitLab Personal Access Token with `api` and `write_repository` scopes; GitLab.com project access tokens are not available on the Free tier.
 4. Confirm one real Aider worker run creates a branch and Draft MR.
 5. Create the hourly GitLab pipeline schedule.
 6. Only after those checks, mark the executor active and unblock the first queue task.
