@@ -51,7 +51,7 @@ def main():
     env["GEMINI_API_KEY"] = api_key
     command = [
         "aider", "--model", "gemini/gemini-3.6-flash",
-        "--yes", "--no-auto-commits", "--map-tokens", "0", "--message-file", prompt_path,
+        "--yes", "--no-auto-commits", "--map-tokens", "0", "--no-gitignore", "--no-suggest-shell-commands", "--input-history-file", "/tmp/aider.input.history", "--chat-history-file", "/tmp/aider.chat.history.md", "--message-file", prompt_path,
         *allowed
     ]
     run(command, env=env)
@@ -74,7 +74,7 @@ def main():
             item["status"] = "in_review"
             item["agent_branch"] = branch
             break
-    queue_path.write_text(json.dumps(queue_data, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+    queue_path.write_text(json.dumps(queue_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     changed.add("agent-control/queue.json")
     run([sys.executable, "agent-control/validate_queue.py", "agent-control/queue.json"])
     run(["git", "diff", "--check"])
