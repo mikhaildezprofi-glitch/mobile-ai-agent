@@ -31,33 +31,18 @@ validate-agent-queue:
       when: never
     - when: always
 
-android-debug-apk:
+github-apk-sync:
   stage: build
-  image: gradle:8.14.3-jdk17
-  timeout: 45m
+  image: python:3.12-slim
+  timeout: 40m
   interruptible: true
-  before_script:
-    - apt-get update
-    - apt-get install -y --no-install-recommends wget unzip git python3
-    - mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-    - wget -q https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -O /tmp/android-tools.zip
-    - unzip -q /tmp/android-tools.zip -d /tmp/android-tools
-    - mv /tmp/android-tools/cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-    - export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
-    - yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null || { sdk_status=${PIPESTATUS[1]}; test "$sdk_status" -eq 0; }
-    - sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.13113456" "cmake;3.31.6"
-    - git clone https://github.com/ggml-org/llama.cpp.git third_party/llama.cpp
-    - git -C third_party/llama.cpp checkout 3de52ac38818978d6da8f386eda43a856e53714a
-    - sed -i 's/listOf("arm64-v8a", "x86_64")/listOf("arm64-v8a")/' third_party/llama.cpp/examples/llama.android/lib/build.gradle.kts
   script:
-    - export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
-    - python3 scripts/patch-llama-diagnostics.py
-    - gradle --no-daemon --stacktrace :app:assembleDebug
+    - python3 scripts/sync-github-release.py --commit "$CI_COMMIT_SHA" --timeout 2100
   artifacts:
     when: always
-    expire_in: 14 days
+    expire_in: 30 days
     paths:
-      - app/build/outputs/apk/debug/*.apk
+      - artifacts/github/
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

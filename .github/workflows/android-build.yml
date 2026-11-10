@@ -2,20 +2,50 @@ name: Android APK Build
 
 on:
   push:
-    branches: [ main, 'feature/**', 'sync/**' ]
+    branches: [ main, 'sync/**' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+  schedule:
+    - cron: '0 * * * *'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout MOBILE AI AGENT
+      - name: Checkout workflow repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync canonical GitLab main (hourly)
+        if: github.event_name == 'schedule'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch main https://gitlab.com/lenives777/mobile-ai-agent.git /tmp/gitlab-source
+          SOURCE_SHA="$(git -C /tmp/gitlab-source rev-parse HEAD)"
+          rsync -a --delete --exclude='.git' /tmp/gitlab-source/ ./
+          echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_ENV"
+          git config user.name "GitLab Source Sync"
+          git config user.email "gitlab-source-sync@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "sync: mirror GitLab main $SOURCE_SHA"
+            git push origin HEAD:refs/heads/sync/gitlab-source
+          fi
+          TARGET_SHA="$(git rev-parse HEAD)"
+          echo "TARGET_SHA=$TARGET_SHA" >> "$GITHUB_ENV"
+
+      - name: Set source commit for push builds
+        if: github.event_name != 'schedule'
+        shell: bash
+        run: |
+          echo "SOURCE_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+          echo "TARGET_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
 
       - name: Checkout llama.cpp Android engine
         uses: actions/checkout@v4
@@ -53,10 +83,57 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Upload APK
+      - name: Create verified build metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          sha256sum "$APK" > app-debug.apk.sha256
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re
+          gradle = pathlib.Path("app/build.gradle.kts").read_text()
+          code = re.search(r"versionCode\s*=\s*(\d+)", gradle)
+          name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
+          apk = pathlib.Path("app/build/outputs/apk/debug/app-debug.apk")
+          data = {
+              "source_commit": os.environ["SOURCE_SHA"],
+              "github_build_commit": os.environ["TARGET_SHA"],
+              "github_workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "github_run_number": os.environ["GITHUB_RUN_NUMBER"],
+              "version_code": int(code.group(1)) if code else None,
+              "version_name": name.group(1) if name else None,
+              "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
+              "apk_size": apk.stat().st_size
+          }
+          pathlib.Path("build-metadata.json").write_text(json.dumps(data, indent=2) + "\n")
+          print(json.dumps(data, indent=2))
+          PY
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: mobile-ai-agent-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app-debug.apk.sha256
+            build-metadata.json
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+      - name: Publish immutable build release for GitLab and device pickup
+        if: (github.event_name == 'schedule') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/sync/'))
+        env:
+          GH_TOKEN: \${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="build-\${SOURCE_SHA:0:12}-\${GITHUB_RUN_ID}"
+          gh release create "$TAG" \
+            app/build/outputs/apk/debug/app-debug.apk \
+            app-debug.apk.sha256 \
+            build-metadata.json \
+            --target "$TARGET_SHA" \
+            --title "MOBILE AI AGENT $TAG" \
+            --notes "Source GitLab commit: $SOURCE_SHA
+          GitHub workflow run: $GITHUB_RUN_ID
+          APK SHA-256 is attached."
