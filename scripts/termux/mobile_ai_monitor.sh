@@ -22,7 +22,9 @@ while true; do
   BUILD="$(pgrep -af 'GradleMain.*assembleDebug|proot.*assembleDebug' | grep -v 'mobile_ai_monitor' | grep -v 'monitor_status' || true)"
   BATTERY="$(termux-battery-status 2>/dev/null)"
   TEMP="$(printf '%s' "$BATTERY" | sed -n 's/.*"temperature":[[:space:]]*\([0-9.]*\).*/\1/p' | head -1)"
-  THERMAL="$(adb shell dumpsys thermalservice 2>/dev/null | grep -m1 -E 'Thermal Status|mStatus' | tr '\n' ' ' || true)"
+  ADB_DIAG="$(proot-distro login ubuntu -- bash -lc '''ADB=/root/alt-adb/platform-tools/adb; "$ADB" -P 5038 devices -l; echo __THERMAL__; "$ADB" -P 5038 shell dumpsys thermalservice 2>/dev/null | grep -m1 -E "Thermal Status|mStatus" | tr "\\n" " " || true''' 2>/dev/null || true)"
+  ADB_OUTPUT="$(printf '%s\n' "$ADB_DIAG" | sed '/^__THERMAL__$/,$d')"
+  THERMAL="$(printf '%s\n' "$ADB_DIAG" | sed '1,/^__THERMAL__$/d' | tr '\n' ' ')"
   MEM="$(awk '/MemAvailable:/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)"
   LOAD="$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo n/a)"
 
@@ -35,7 +37,6 @@ while true; do
     WIFI_STATE="DISCONNECTED"
   fi
 
-  ADB_OUTPUT="$(adb devices 2>/dev/null || true)"
   if printf '%s\n' "$ADB_OUTPUT" | awk 'NR>1 && $2=="device" {found=1} END {exit !found}'; then
     ADB_STATE="CONNECTED"
   elif printf '%s\n' "$ADB_OUTPUT" | awk 'NR>1 && $2=="offline" {found=1} END {exit !found}'; then

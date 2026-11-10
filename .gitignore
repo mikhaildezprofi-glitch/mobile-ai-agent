@@ -9,3 +9,7 @@ local.properties
 secrets.properties
 .polydev/
 .base/
+models/
+third_party/
+*.gguf
+*.apk
