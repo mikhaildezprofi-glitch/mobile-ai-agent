@@ -92,7 +92,7 @@ class GenerationForegroundService : Service() {
             .setContentTitle("MOBILE AI AGENT")
             .setContentText(
                 if (localInference) "Локальная модель генерирует ответ в фоне"
-                else "Облачная модель готовит ответ; телефон не удерживает CPU активным"
+                else "Облачный запрос выполняется без запуска локальной модели"
             )
             .setContentIntent(openChatPendingIntent())
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
