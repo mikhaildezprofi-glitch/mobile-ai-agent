@@ -83,7 +83,7 @@ def main():
         queue = json.loads(
             pathlib.Path("agent-control/queue.json").read_text(encoding="utf-8")
         )
-        tasks = queue.get("pasks", [])
+        tasks = queue.get("tasks", [])
         counts = {}
         for task in tasks:
             status = task.get("status", "unknown")
