@@ -84,6 +84,10 @@ gitlab-ai-agent:
   script:
     - python agent-control/worker.py
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $GEMINI_API_KEY && $GITLAB_AGENT_TOKEN'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push" && $GEMINI_API_KEY && $GITLAB_AGENT_TOKEN'
+      when: on_success
     - if: '$CI_PIPELINE_SOURCE == "web" && $GEMINI_API_KEY && $GITLAB_AGENT_TOKEN'
       when: manual
     - when: never

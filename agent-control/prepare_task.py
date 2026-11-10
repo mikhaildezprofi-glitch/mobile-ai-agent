@@ -23,6 +23,9 @@ def github_inventory():
 def main():
     data = json.loads(QUEUE.read_text(encoding="utf-8"))
     tasks = [task for task in data["tasks"] if task["status"] == "queued"]
+    if len(tasks) == 0:
+        print(json.dumps({"no_task": True}))
+        return
     if len(tasks) != 1:
         raise SystemExit(f"Expected exactly one queued task; found {len(tasks)}")
     task = tasks[0]

@@ -35,6 +35,9 @@ def main():
     prepared = json.loads(subprocess.check_output(
         [sys.executable, "agent-control/prepare_task.py"], text=True
     ))
+    if prepared.get("no_task"):
+        print("No queued coding task; worker exits without changes.")
+        return
     task_id = prepared["task_id"]
     branch = prepared["branch"]
     allowed = prepared["allowed_paths"]
