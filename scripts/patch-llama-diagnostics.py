@@ -355,6 +355,8 @@ replace_once(
     "    private external fun processUserPrompt(userPrompt: String, predictLength: Int): Int",
     """    private external fun processUserPrompt(userPrompt: String, predictLength: Int): Int
 
+    private external fun lastError(): String
+
     private external fun loadVisionProjectorNative(projectorPath: String): Int
 
     private external fun processUserPromptWithImagesNative(

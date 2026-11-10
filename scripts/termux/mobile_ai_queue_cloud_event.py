@@ -48,7 +48,7 @@ def main():
     }
     event = {k: v for k, v in event.items() if v is not None}
     out = QUEUE / 'agent-queue' / f'{task_id}.json'
-    out.write_text(json.dumps(event, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')
+    out.write_text(json.dumps(event, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     git('add', str(out.relative_to(QUEUE)))
     git('-c', 'user.name=MOBILE AI Termux Monitor',
         '-c', 'user.email=termux-worker@users.noreply.github.com',
