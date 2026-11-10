@@ -1,0 +1,191 @@
+name: MOBILE AI Agent Hourly Device Watchdog
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/device-watchdog.yml'
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: mobile-ai-device-watchdog
+  cancel-in-progress: false
+
+jobs:
+  check-device:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Checkout phone queue and heartbeat
+        uses: actions/checkout@v4
+        with:
+          ref: agent-queue
+          path: phone-queue
+          fetch-depth: 1
+
+      - name: Check phone availability and notify when a queued task needs it
+        uses: actions/github-script@v7
+        env:
+          PHONE_QUEUE_DIR: phone-queue/agent-queue
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const queueDir = process.env.PHONE_QUEUE_DIR;
+            const heartbeatPath = path.join(queueDir, 'device-heartbeat.json');
+            const now = Date.now();
+            const maxAgeMinutes = 75;
+            let heartbeat = null;
+            let heartbeatAgeMinutes = null;
+            let heartbeatValid = false;
+
+            try {
+              heartbeat = JSON.parse(fs.readFileSync(heartbeatPath, 'utf8'));
+              const timestamp = Date.parse(heartbeat.checked_at || '');
+              if (Number.isFinite(timestamp)) {
+                heartbeatAgeMinutes = Math.max(0, (now - timestamp) / 60000);
+                heartbeatValid = heartbeatAgeMinutes <= maxAgeMinutes;
+              }
+            } catch (_) {
+              heartbeat = null;
+            }
+
+            const commandsDir = path.join(queueDir, 'commands');
+            const resultsDir = path.join(queueDir, 'results');
+            const pending = [];
+            if (fs.existsSync(commandsDir)) {
+              for (const name of fs.readdirSync(commandsDir).filter(n => n.endsWith('.json')).sort()) {
+                const file = path.join(commandsDir, name);
+                try {
+                  const task = JSON.parse(fs.readFileSync(file, 'utf8'));
+                  const id = String(task.task_id || name.replace(/\.json$/, ''));
+                  if (!fs.existsSync(path.join(resultsDir, id + '.json'))) {
+                    pending.push({
+                      id,
+                      action: String(task.action || 'unknown'),
+                      requiresAdb: task.requires_adb === true,
+                      requiresWifi: task.requires_wifi === true
+                    });
+                  }
+                } catch (_) {
+                  pending.push({ id: name, action: 'invalid-json', requiresAdb: false, requiresWifi: false });
+                }
+              }
+            }
+
+            const needsTermux = pending.length > 0;
+            const needsAdb = pending.some(t => t.requiresAdb);
+            const needsWifi = pending.some(t => t.requiresWifi);
+            const termuxAvailable = heartbeatValid && heartbeat?.termux_worker_running === true;
+            const adbAvailable = heartbeatValid && heartbeat?.adb_connected === true;
+            const wifiAvailable = heartbeatValid && heartbeat?.wifi_connected === true;
+
+            const blockers = [];
+            if (needsTermux && !termuxAvailable) blockers.push('Termux cloud worker heartbeat is missing or older than 75 minutes');
+            if (needsAdb && !adbAvailable) blockers.push('ADB Wireless Debugging is not connected');
+            if (needsWifi && !wifiAvailable) blockers.push('Wi-Fi is not connected');
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const marker = '<!-- mobile-ai-device-watchdog -->';
+            const blockerSignature = blockers.slice().sort().join(' | ');
+            const blockerMarker = '<!-- blockers:' + blockerSignature + ' -->';
+            const title = '[MOBILE AI] Требуется восстановить связь с телефоном';
+            const openIssues = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', per_page: 100
+            });
+            const existing = openIssues.data.find(i => !i.pull_request && i.title === title);
+
+            const pendingText = pending.length
+              ? pending.map(t => '- ' + t.id + ' (' + t.action + ')' +
+                  (t.requiresAdb ? ' [ADB]' : '') + (t.requiresWifi ? ' [Wi-Fi]' : '')).join('\n')
+              : 'Нет ожидающих задач для телефона.';
+            const heartbeatText = heartbeat
+              ? [
+                  '- Последний сигнал: ' + (heartbeat.checked_at || 'неизвестно'),
+                  '- Возраст сигнала: ' + (heartbeatAgeMinutes === null ? 'неизвестен' : heartbeatAgeMinutes.toFixed(1) + ' мин'),
+                  '- Termux worker: ' + String(heartbeat.termux_worker_running),
+                  '- Локальный монитор: ' + String(heartbeat.monitor_running),
+                  '- Wi-Fi: ' + String(heartbeat.wifi_connected),
+                  '- Сетевой интерфейс: ' + String(heartbeat.network_interface || 'unknown'),
+                  '- ADB: ' + String(heartbeat.adb_connected),
+                ].join('\n')
+              : '- Heartbeat отсутствует или не читается.';
+
+            const body = [
+              marker,
+              blockerMarker,
+              'Облачный монитор обнаружил, что ожидающая задача требует недоступный канал телефона.',
+              '',
+              '## Причина',
+              blockers.length ? blockers.map(x => '- ' + x).join('\n') : '- Нет блокировок.',
+              '',
+              '## Состояние устройства',
+              heartbeatText,
+              '',
+              '## Ожидающие задачи',
+              pendingText,
+              '',
+              'Облачные задачи, не требующие телефона, продолжают выполняться. Монитор проверяет состояние каждый час.',
+              '',
+              'После восстановления связи задача будет доступна локальному исполнителю при следующем цикле опроса.',
+              '',
+              'Для получения push-уведомлений включите уведомления GitHub на телефоне и наблюдение за этим репозиторием.'
+            ].join('\n');
+
+            if (blockers.length) {
+              if (existing) {
+                if (existing.body !== body) {
+                  const previousMarker = (existing.body || '').match(/<!-- blockers:(.*?) -->/);
+                  const previousSignature = previousMarker ? previousMarker[1] : '';
+                  await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+                  if (previousSignature !== blockerSignature) {
+                    await github.rest.issues.createComment({
+                      owner, repo, issue_number: existing.number,
+                      body: '@' + owner + ' Изменился набор недоступных каналов: ' + blockers.join('; ')
+                    });
+                  }
+                }
+              } else {
+                await github.rest.issues.create({
+                  owner, repo, title, body: body + '\n\n@' + owner,
+                  assignees: [owner]
+                });
+              }
+              core.setFailed('Phone-dependent queue work is blocked: ' + blockers.join('; '));
+            } else {
+              if (existing) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: existing.number,
+                  body: '@' + owner + ' Связь с необходимыми каналами телефона восстановлена. Ожидающие задачи могут продолжаться.'
+                });
+                await github.rest.issues.update({
+                  owner, repo, issue_number: existing.number,
+                  state: 'closed',
+                  state_reason: 'completed'
+                });
+              }
+              core.info('No phone-dependent tasks are blocked.');
+            }
+
+            await core.summary
+              .addHeading('MOBILE AI phone availability')
+              .addTable([
+                [{data:'Check',header:true},{data:'Status',header:true}],
+                ['Pending phone tasks', String(pending.length)],
+                ['Termux heartbeat', heartbeatValid ? 'fresh' : 'missing/stale'],
+                ['ADB connected', String(adbAvailable)],
+                ['Wi-Fi connected', String(wifiAvailable)],
+                ['Blocked', String(blockers.length > 0)]
+              ])
+              .addRaw('\n' + (blockers.length ? blockers.join('\n') : 'No blocked phone tasks.'))
+              .write();
