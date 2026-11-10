@@ -1,40 +1,27 @@
-# MOBILE AI AGENT: cloud AI agent team
+# MOBILE AI AGENT: GitLab agent team
 
-## Current roles
+GitLab is the only primary development and agent orchestration platform for this project. GitHub Copilot-specific profiles and GitHub Actions workflows are retired from the GitLab source branch.
 
-See [AI_AGENT_ROLLOUT_PLAN.md](AI_AGENT_ROLLOUT_PLAN.md) for the staged activation plan and the currently verified execution boundaries.
+## Active role definitions
 
-The repository contains reusable GitHub Copilot custom-agent profiles:
+Portable specialist instructions live under agent-control/roles/:
 
-| Profile | Responsibility |
-|---|---|
-| Agent Coordinator | Breaks work into dependent tasks, assigns specialist profiles, and tracks verified handoffs |
-| Android Engineer | Kotlin, Compose, Android lifecycle and permissions |
-| AI Runtime Engineer | llama.cpp, GGUF, JNI/NDK and native runtime |
-| Cloud Build Engineer | GitHub Actions, build pipeline and artifacts |
-| QA Engineer | Tests, regression checks and evidence |
-| Security Auditor | Permissions, secrets, workflows and data safety |
+- coordinator.md: serial task planning and handoffs
+- android.md: Kotlin, Compose, lifecycle, permissions and device integration
+- native-runtime.md: llama.cpp, GGUF, JNI, NDK, OpenMP and ggml
+- cloud-build.md: GitLab CI/CD, Gradle, SDK/NDK and APK artifacts
+- qa.md: tests, regressions and acceptance evidence
+- security.md: secrets, permissions, supply chain and task boundaries
+- research.md: repository audits and evidence-based reports
 
-Profiles are stored in `.github/agents/*.agent.md` and become available in supported GitHub Copilot agent surfaces after the files are merged into the repository's default branch and the account/repository has coding-agent access enabled.
+## Execution model
 
-## Safe execution protocol
+Aider is the coding executor running inside GitLab CI. Gemini API Free is the initial model provider. The queue is agent-control/queue.json. The worker accepts one queued task, restricts writable paths, pushes a dedicated branch and opens a Draft Merge Request. It never writes to main or merges its own work.
 
-The Agent Coordinator is the entry point for decomposing a larger request. It may delegate independent analysis to specialist profiles, but shared-file edits and dependent build/test stages remain sequential. It must stop when an agent, permission, or service is unavailable rather than fabricate completion.
+## What counts as an active agent
 
+A role file is not an active agent. A pipeline is not an active agent. An agent is counted only when a real gitlab-ai-agent worker job is running or has completed and its branch and Draft MR can be verified.
 
-1. Create a focused GitHub issue with acceptance criteria.
-2. Assign one coding agent to one implementation task.
-3. Select a custom profile when starting the task, if the GitHub UI offers it.
-4. Require a dedicated branch and draft PR.
-5. Run the repository quality gates.
-6. Request independent QA and security review.
-7. A human reviews and merges. Agents must not merge their own work.
+## Safety
 
-## Important limitations
-
-- A custom profile is a role definition, not a running agent or an automatic worker.
-- The hourly device watchdog is monitoring only; it does not dispatch coding agents.
-- The Gemini triage workflow is diagnostics-only and requires the repository secret `GEMINI_API_KEY`; it does not edit code.
-- The existing queue bridge validates events and does not itself execute an AI coding agent.
-- Copilot, Claude, or Codex cloud-agent availability depends on the account plan and repository policy.
-- Do not claim that an agent is active until GitHub shows an active session/task or a draft PR from that agent.
+One task at a time. Required checks before advancing. Human review and merge only. No secrets, model weights, signing keys, personal data or private logs are sent to the free model API.
