@@ -22,11 +22,12 @@ No billing account or card is required for the Gemini Free API tier when the acc
 
 ## Enable the first task
 
-1. Add the two masked/protected CI variables.
-2. Review the queue task and change its status from `blocked` to `queued` only after the executor credentials are configured.
-3. Run **Build → Pipelines → Run pipeline** on the default branch.
-4. Start the manual `gitlab-ai-agent` job.
-5. Review the Draft MR and its CI evidence. Never auto-merge.
+1. Add masked/protected CI variables `GEMINI_API_KEY` and `GITLAB_AGENT_TOKEN`. The latter is a GitLab Personal Access Token with `api` and `write_repository` scopes.
+2. Ensure the default branch is protected so protected variables are available only to trusted pipelines.
+3. Change the first queue task from `blocked` to `queued` only after both variables are configured.
+4. A push to the default branch starts the worker automatically after the Android build succeeds. An hourly scheduled pipeline also starts it when a task is queued. An empty queue is a no-op and does not install Aider or Git.
+5. A manual web pipeline is available for controlled testing.
+6. Review the Draft MR and its CI evidence. Human review and merge remain mandatory.
 
 ## Hourly monitoring
 

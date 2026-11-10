@@ -33,7 +33,7 @@ GitLab Duo Agent Platform is not selected as the free replacement because its ge
 
 ## Free-tier constraints
 
-GitLab Free includes a limited monthly CI compute allowance. Android builds are expensive compared with small validation jobs, so keep queue validation and monitoring lightweight and run full APK builds on merge requests and the default branch. Gemini API Free has model-specific quotas and may be unavailable to some accounts/projects. No billing account or card is assumed.
+GitLab.com Free includes 400 compute minutes per month for hosted runners. Android builds are expensive compared with small validation jobs, so run APK builds only on merge requests and the default branch, auto-cancel obsolete MR builds, and keep hourly monitoring to one lightweight job. The hourly worker checks for queued tasks before installing Git or Aider, so an empty queue is a low-cost no-op. Gemini 3.8 Flash is configured through the Gemini API Free tier; model quotas and availability can vary. No paid billing is enabled.
 
 Google's unpaid Gemini API terms permit submitted prompts and responses to be used to improve Google services and reviewed by humans. Do not submit secrets, private data, signing material, model weights, personal data, or private logs.
 

@@ -16,7 +16,7 @@ Move all primary source development, builds, task coordination and agent executi
 - Add masked CI variable GEMINI_API_KEY using an eligible Google AI Studio Free API key.
 - Add masked CI variable GITLAB_AGENT_TOKEN using a GitLab Personal Access Token (PAT) with api and write_repository scopes. GitLab.com project access tokens require Premium, so use a PAT on Free. Set an expiry date and never share the token in chat.
 - Keep credentials out of repository files, artifacts and logs.
-- Start one manual gitlab-ai-agent job from the protected default branch.
+- Queue the first task only after both variables exist. A protected default-branch push starts the worker automatically after CI checks; the hourly schedule also dispatches a queued task. A manual web pipeline remains available for controlled testing.
 - Verify the actual Aider worker job, dedicated branch and Draft Merge Request before marking the executor active.
 
 ## Phase 2: first controlled task
