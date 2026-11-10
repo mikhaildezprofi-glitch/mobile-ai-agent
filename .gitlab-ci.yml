@@ -5,6 +5,8 @@ stages:
   - agent
 
 workflow:
+  auto_cancel:
+    on_new_commit: interruptible
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
@@ -31,6 +33,7 @@ android-debug-apk:
   stage: build
   image: gradle:8.14.3-jdk17
   timeout: 45m
+  interruptible: true
   before_script:
     - apt-get update
     - apt-get install -y --no-install-recommends wget unzip git python3
