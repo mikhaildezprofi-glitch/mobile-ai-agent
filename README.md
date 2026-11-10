@@ -1,41 +1,43 @@
 # MOBILE AI AGENT
 
-Стартовый Android-проект персонального AI-ассистента на Kotlin и Jetpack Compose.
+Основной репозиторий проекта: GitLab.
 
-## Текущий этап: 0.1.0
+- GitLab: https://gitlab.com/lenives777/mobile-ai-agent
+- Сборка и тесты: GitLab CI/CD (`.gitlab-ci.yml`)
+- Очередь задач: `agent-control/queue.json`
+- Роли AI-агентов: `agent-control/roles/`
+- Документация миграции: `docs/GITLAB_PRIMARY_PLATFORM.md`
 
-- Главный экран MOBILE AI AGENT.
-- Переключение локального и гибридного режимов (пока интерфейсное).
-- Диагностический переключатель и базовый статус.
-- GitHub Actions для сборки debug APK.
+GitHub остаётся отдельной архивной копией. Новые задачи, сборки, проверки и агентная работа ведутся в GitLab. GitHub Actions и Copilot-профили удалены из миграционной ветки.
 
-## Сборка APK через GitHub Actions
+## Состояние переноса
 
-1. Загрузите проект в GitHub в ветку `main`.
-2. Откройте вкладку **Actions**.
-3. Запустите workflow **Android APK Build** (или дождитесь запуска после push).
-4. Откройте завершённый запуск и скачайте artifact `mobile-ai-agent-debug-apk`.
-5. Распакуйте artifact и установите APK на Android.
+- GitLab CI: валидатор очереди и Python-скриптов проходит проверку.
+- Android APK: GitLab job добавлен; полная сборка ещё проходит проверку на GitLab Runner.
+- AI executor: подготовлен Aider + Gemini API Free, но пока не активирован. Для запуска нужны masked CI variables `GEMINI_API_KEY` и `GITLAB_AGENT_TOKEN`.
+- Очередь: первая задача source-sync audit остаётся `blocked` до подключения и проверки исполнителя.
+- Мониторинг: подготовлен read-only job для CI, Merge Requests, очереди, реальной активности worker job и Termux/ADB heartbeat. Для ежечасного запуска требуется GitLab pipeline schedule.
 
-## Локальная сборка
+## Android build environment
 
-Требуются JDK 17, Android SDK 35 и Gradle 8.9:
+- JDK 17
+- Gradle 8.14.3
+- Android SDK Platform 36
+- Android NDK 29.0.13113456
+- CMake 3.31.6
+- llama.cpp pinned at commit `3de52ac38818978d6da8f386eda43a856e53714a`
 
-```bash
-gradle --no-daemon :app:assembleDebug
-```
+Запустите pipeline в GitLab и скачайте artifact `app/build/outputs/apk/debug/*.apk` из job `android-debug-apk`.
 
-APK будет создан в `app/build/outputs/apk/debug/`.
+## Известное ограничение runtime
 
-## План развития
+Ранее на Samsung S23 FE при загрузке native-библиотеки возникала ошибка `UnsatisfiedLinkError` с отсутствующим символом `__kmpc_global_thread_num`. Успешная сборка APK сама по себе не подтверждает исправление этой ошибки. Runtime считается исправленным только после установки APK и успешного запуска локальной модели на устройстве.
 
-1. Подключить локальный inference engine и управление моделью GGUF.
-2. Добавить опциональный облачный провайдер с явным согласием пользователя.
-3. Добавить голосовой ввод/вывод.
-4. Добавить CameraX и анализ изображений/видео.
-5. Добавить SAF для безопасной работы с файлами.
-6. Добавить Android-инструменты с системными разрешениями и подтверждением действий.
+## Правила работы
 
-## Ограничения стартовой версии
-
-Переключатель режимов пока меняет только интерфейсное состояние. Ни локальная модель, ни облачный API, камера, микрофон, захват экрана и выполнение команд Android ещё не подключены. Никакие секреты API не должны попадать в Git.
+- Одна задача за раз.
+- Каждая задача имеет критерии приёмки и список разрешённых файлов.
+- Изменения публикуются отдельной веткой и Draft Merge Request.
+- Обязательные проверки до перехода к следующей задаче.
+- Никаких прямых записей в `main`, автоматического слияния или разрушительных действий.
+- Не хранить API keys, токены, модели, APK, signing keys и резервные копии в Git.

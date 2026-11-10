@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "max_parallel_tasks": 1,
+    "require_tests_before_next_task": true,
+    "require_merge_request": true,
+    "allow_main_writes": false,
+    "allow_destructive_actions": false
+  },
+  "tasks": [
+    {
+      "id": "audit-repo-source-sync",
+      "title": "Сверить GitHub и GitLab и подготовить безопасную синхронизацию исходников",
+      "role": "research",
+      "status": "blocked",
+      "base_branch": "main",
+      "allowed_paths": [
+        "docs/GITLAB_PRIMARY_PLATFORM.md",
+        "docs/REPOSITORY_SYNC_AUDIT.md"
+      ],
+      "acceptance_criteria": [
+        "Сверить GitHub main с текущей веткой GitLab по HEAD SHA и полному списку отслеживаемых файлов",
+        "Выявить отсутствующие и устаревшие исходники Android, Gradle и native integration",
+        "Отдельно учесть llama.cpp как внешний pinned dependency, не копировать его исходники без необходимости",
+        "Подготовить отчёт с точными путями и SHA",
+        "Не копировать секреты, модели, APK, ключи подписи и пользовательские резервные копии",
+        "Не менять main и не выполнять автоматическое слияние"
+      ]
+    }
+  ]
+}
