@@ -12,8 +12,8 @@ android {
         applicationId = "com.mikhaildezprofi.mobileaiagent"
         minSdk = 33
         targetSdk = 36
-        versionCode = 20
-        versionName = "0.3.8"
+        versionCode = 21
+        versionName = "0.3.9"
     }
 
     buildTypes {

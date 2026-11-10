@@ -59,6 +59,7 @@ import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.VisionInferenceEngine
 import com.mikhaildezprofi.mobileaiagent.AgentCoordinator
+import com.mikhaildezprofi.mobileaiagent.VisionModelAssets
 import com.mikhaildezprofi.mobileaiagent.AgentProviderKind
 import com.mikhaildezprofi.mobileaiagent.ImageAttachmentSource
 import com.mikhaildezprofi.mobileaiagent.ImageAttachmentStager
@@ -284,6 +285,13 @@ fun MainScreen() {
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showDiagnosticsDialog by remember { mutableStateOf(false) }
     var showCapabilitiesDialog by remember { mutableStateOf(false) }
+    var visionDownloadBusy by remember { mutableStateOf(false) }
+    var visionDownloadProgress by remember { mutableFloatStateOf(0f) }
+    var visionDownloadStatus by remember { mutableStateOf("Vision-модель ещё не установлена.") }
+    var visionAssetsInstalled by remember { mutableStateOf(VisionModelAssets.areAssetsPresent(appContext)) }
+    val qwenModelFile = remember(appContext) {
+        File(appContext.filesDir, "models/Qwen3-1.7B-Q4_K_M.gguf")
+    }
 
     // Runtime files are editable independently from the installed APK.
     var runtimeFiles by remember { mutableStateOf(RuntimeFiles.load(appContext)) }
@@ -551,6 +559,102 @@ fun MainScreen() {
                 }.take(12000)
             } finally {
                 busy = false
+            }
+        }
+    }
+
+    suspend fun activateModelFileNow(modelFile: File, projectorFile: File?) {
+        val activeEngine = engine ?: error("Нативный движок ещё не инициализирован.")
+        check(modelFile.isFile && modelFile.canRead() && modelFile.length() > 0L) {
+            "Файл модели не найден или недоступен."
+        }
+        status = "Освобождение памяти и загрузка ${modelFile.name}…"
+        withContext(Dispatchers.IO) {
+            if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
+                activeEngine.state.value is InferenceEngine.State.Error
+            ) activeEngine.cleanUp()
+            activeEngine.loadModel(modelFile.absolutePath)
+            if (systemPrompt.isNotBlank()) activeEngine.setSystemPrompt(systemPrompt)
+            if (projectorFile != null) {
+                check(projectorFile.isFile && projectorFile.canRead() && projectorFile.length() > 0L) {
+                    "Vision-проектор не найден."
+                }
+                val vision = activeEngine as? VisionInferenceEngine
+                    ?: error("Нативная библиотека не поддерживает vision.")
+                vision.loadVisionProjector(projectorFile.absolutePath)
+            }
+        }
+        val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+        val editor = preferences.edit().putString("model_path", modelFile.absolutePath)
+        if (projectorFile != null) {
+            editor.putString("vision_mmproj_path", projectorFile.absolutePath)
+        } else {
+            editor.remove("vision_mmproj_path")
+        }
+        check(editor.commit()) { "Не удалось сохранить выбранную модель." }
+        modelReady = activeEngine.state.value is InferenceEngine.State.ModelReady
+        visionRevision++
+        check(modelReady) { "Движок не подтвердил готовность модели." }
+        status = if (projectorFile != null) {
+            "SmolVLM загружена вместе с проверенным vision-проектором. Анализ фото включён."
+        } else {
+            "Qwen загружена. Локальный текстовый режим активен."
+        }
+    }
+
+    fun activateModelFile(modelFile: File, projectorFile: File?) {
+        if (busy || visionDownloadBusy) return
+        scope.launch {
+            busy = true
+            try {
+                activateModelFileNow(modelFile, projectorFile)
+            } catch (error: Exception) {
+                modelReady = engine?.state?.value is InferenceEngine.State.ModelReady
+                visionRevision++
+                status = "Не удалось переключить модель: ${error.message ?: error.javaClass.simpleName}"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun downloadAndActivateVisionModel() {
+        if (busy || visionDownloadBusy) return
+        scope.launch {
+            visionDownloadBusy = true
+            var modelActivationStarted = false
+            visionDownloadProgress = 0f
+            visionDownloadStatus = "Проверка файлов SmolVLM…"
+            try {
+                val assets = VisionModelAssets.download(appContext) { progress ->
+                    withContext(Dispatchers.Main) {
+                        visionDownloadProgress = progress.fraction
+                        val currentMb = progress.fileBytes / (1024L * 1024L)
+                        val totalMb = progress.fileTotalBytes / (1024L * 1024L)
+                        val overallMb = progress.completedBytes / (1024L * 1024L)
+                        val overallTotalMb = progress.totalBytes / (1024L * 1024L)
+                        visionDownloadStatus =
+                            "${progress.fileName}: $currentMb / $totalMb МБ • всего $overallMb / $overallTotalMb МБ"
+                    }
+                }
+                visionAssetsInstalled = true
+                if (busy) {
+                    visionDownloadStatus =
+                        "Файлы скачаны и проверены. Дождитесь завершения текущего ответа, затем нажмите загрузку ещё раз."
+                    return@launch
+                }
+                visionDownloadStatus = "Оба файла проверены по SHA-256. Загружаю модель…"
+                busy = true
+                modelActivationStarted = true
+                activateModelFileNow(assets.model, assets.projector)
+                visionDownloadStatus = "SmolVLM установлена и загружена. Qwen сохранена отдельно."
+            } catch (error: Exception) {
+                visionAssetsInstalled = VisionModelAssets.areAssetsPresent(appContext)
+                visionDownloadStatus = "Ошибка: ${error.message ?: error.javaClass.simpleName}"
+                status = visionDownloadStatus
+            } finally {
+                if (modelActivationStarted) busy = false
+                visionDownloadBusy = false
             }
         }
     }
@@ -1226,9 +1330,48 @@ fun MainScreen() {
             onDismissRequest = { showModelDialog = false },
             title = { Text("Модель и режим") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Text(status)
-                    Text(if (modelReady) "Локальная модель загружена" else "Модель не загружена")
+                    Text(
+                        when {
+                            visionReady -> "Активна SmolVLM: локальный анализ изображений доступен."
+                            modelReady -> "Локальная текстовая модель загружена."
+                            else -> "Локальная модель не загружена."
+                        }
+                    )
+                    HorizontalDivider()
+                    Text("Vision-модель для фото и кадров видео", fontWeight = FontWeight.SemiBold)
+                    Text("SmolVLM 500M Q8_0 • 436,8 МБ + проектор 108,8 МБ. Файлы хранятся отдельно от Qwen; одновременно загружается только одна модель.")
+                    if (visionDownloadBusy) {
+                        LinearProgressIndicator(progress = visionDownloadProgress, modifier = Modifier.fillMaxWidth())
+                    }
+                    Text(visionDownloadStatus, style = MaterialTheme.typography.bodySmall)
+                    Button(
+                        onClick = { downloadAndActivateVisionModel() },
+                        enabled = engine != null && !busy && !visionDownloadBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (visionAssetsInstalled) "Проверить и загрузить SmolVLM"
+                            else "Скачать и загрузить SmolVLM"
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { activateModelFile(qwenModelFile, null) },
+                        enabled = qwenModelFile.isFile && engine != null && !busy && !visionDownloadBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Переключиться на Qwen 1.7B")
+                    }
+                    Text(
+                        "Загрузка идёт напрямую с Hugging Face. Перед активацией оба GGUF проверяются по SHA-256. Передача фотографий в облако не включается.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    HorizontalDivider()
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Локальный режим")
                         Spacer(Modifier.weight(1f))
