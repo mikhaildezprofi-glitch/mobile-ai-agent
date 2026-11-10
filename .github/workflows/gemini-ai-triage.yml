@@ -26,8 +26,6 @@ jobs:
     steps:
       - name: Checkout event
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Prepare minimal sanitized input
         id: prepare
@@ -104,12 +102,12 @@ jobs:
         if: ${{ steps.secret_check.outputs.configured == 'true' && steps.prepare.outputs.count != '0' }}
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-3.8-flash
+          GEMINI_MODEL: gemini-3.5-flash-lite
         shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
-          import json, os, pathlib, urllib.request, urllib.error
+          import json, os, pathlib, time, urllib.request, urllib.error
           events = json.loads(pathlib.Path("triage_input.json").read_text(encoding="utf-8"))
           prompt = """You are a cautious Android project diagnostics assistant.
           Analyze the supplied sanitized device/project status events.
@@ -126,37 +124,57 @@ jobs:
           """ + json.dumps(events, ensure_ascii=False)
           payload = {
               "contents": [{"parts": [{"text": prompt}]}],
-              "generationConfig": {"responseMimeType": "application/json"}
+              "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
           }
-          url = "https://generativelanguage.googleapis.com/v1beta/models/" + os.environ["GEMINI_MODEL"] + ":generateContent?key=" + os.environ["GEMINI_API_KEY"]
-          req = urllib.request.Request(
-              url, data=json.dumps(payload).encode("utf-8"),
-              headers={"Content-Type": "application/json"}, method="POST"
-          )
-          try:
-              with urllib.request.urlopen(req, timeout=75) as response:
-                  data = json.loads(response.read().decode("utf-8"))
-          except urllib.error.HTTPError as exc:
-              # Record only HTTP status and provider status code; never log the key or response body.
-              api_status = "UNKNOWN"
-              try:
-                  error_data = json.loads(exc.read().decode("utf-8"))
-                  api_status = str(error_data.get("error", {}).get("status", "UNKNOWN"))[:80]
-              except Exception:
-                  pass
+          models = [os.environ["GEMINI_MODEL"], "gemini-3.1-flash-lite"]
+          data = None
+          last_http = "none"
+          last_provider_status = "UNKNOWN"
+          for model in models:
+              for attempt in range(3):
+                  url = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + os.environ["GEMINI_API_KEY"]
+                  req = urllib.request.Request(
+                      url, data=json.dumps(payload).encode("utf-8"),
+                      headers={"Content-Type": "application/json"}, method="POST"
+                  )
+                  try:
+                      with urllib.request.urlopen(req, timeout=75) as response:
+                          data = json.loads(response.read().decode("utf-8"))
+                      print("Gemini response received from " + model)
+                      break
+                  except urllib.error.HTTPError as exc:
+                      last_http = str(exc.code)
+                      try:
+                          error_data = json.loads(exc.read().decode("utf-8"))
+                          last_provider_status = str(error_data.get("error", {}).get("status", "UNKNOWN"))[:80]
+                      except Exception:
+                          last_provider_status = "UNKNOWN"
+                      if exc.code in {429, 500, 502, 503, 504} and attempt < 2:
+                          time.sleep(2 ** (attempt + 1))
+                          continue
+                      if exc.code in {429, 404, 500, 502, 503, 504}:
+                          break
+                      pathlib.Path("triage-status.md").write_text(
+                          "# Gemini AI triage\n\nStatus: request failed\n\nHTTP: " + last_http +
+                          "\nProvider status: " + last_provider_status + "\n",
+                          encoding="utf-8"
+                      )
+                      raise SystemExit(1)
+                  except (urllib.error.URLError, TimeoutError):
+                      last_http = "network-timeout"
+                      if attempt < 2:
+                          time.sleep(2 ** (attempt + 1))
+                          continue
+                      break
+              if data is not None:
+                  break
+          if data is None:
               pathlib.Path("triage-status.md").write_text(
-                  f"# Gemini AI triage\n\nStatus: **request failed**\n\nHTTP: `{exc.code}`\n\nProvider status: `{api_status}`\n",
+                  "# Gemini AI triage\n\nStatus: request failed after retries\n\nHTTP: " +
+                  last_http + "\nProvider status: " + last_provider_status +
+                  "\nModels tried: " + ", ".join(models) + "\n",
                   encoding="utf-8"
               )
-              print(f"Gemini API returned HTTP {exc.code} ({api_status}).")
-              raise SystemExit(1)
-          except Exception as exc:
-              error_type = type(exc).__name__
-              pathlib.Path("triage-status.md").write_text(
-                  f"# Gemini AI triage\n\nStatus: **request failed**\n\nClient error: `{error_type}`\n",
-                  encoding="utf-8"
-              )
-              print(f"Gemini request failed: {error_type}.")
               raise SystemExit(1)
           try:
               raw = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -176,7 +194,7 @@ jobs:
               result["requires_user_approval"] = True
           except Exception:
               pathlib.Path("triage-status.md").write_text(
-                  "# Gemini AI triage\n\nStatus: **invalid model response**. No action was authorized.\n",
+                  "# Gemini AI triage\n\nStatus: invalid model response. No action was authorized.\n",
                   encoding="utf-8"
               )
               raise SystemExit(1)
@@ -187,7 +205,6 @@ jobs:
           PY
 
       - name: Upload triage report
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mobile-ai-agent-gemini-triage
