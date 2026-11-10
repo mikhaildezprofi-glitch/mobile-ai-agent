@@ -287,8 +287,19 @@ fun MainScreen() {
     var showCapabilitiesDialog by remember { mutableStateOf(false) }
     var visionDownloadBusy by remember { mutableStateOf(false) }
     var visionDownloadProgress by remember { mutableFloatStateOf(0f) }
-    var visionDownloadStatus by remember { mutableStateOf("Vision-модель ещё не установлена.") }
-    var visionAssetsInstalled by remember { mutableStateOf(VisionModelAssets.areAssetsPresent(appContext)) }
+    val visionAssetsInitiallyInstalled = remember(appContext) {
+        VisionModelAssets.areAssetsPresent(appContext)
+    }
+    var visionDownloadStatus by remember {
+        mutableStateOf(
+            if (visionAssetsInitiallyInstalled) {
+                "Файлы SmolVLM найдены. SHA-256 будет проверен перед загрузкой."
+            } else {
+                "Vision-модель ещё не установлена."
+            }
+        )
+    }
+    var visionAssetsInstalled by remember { mutableStateOf(visionAssetsInitiallyInstalled) }
     val qwenModelFile = remember(appContext) {
         File(appContext.filesDir, "models/Qwen3-1.7B-Q4_K_M.gguf")
     }
