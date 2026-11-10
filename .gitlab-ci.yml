@@ -27,6 +27,8 @@ validate-agent-queue:
     - python -m py_compile agent-control/validate_queue.py agent-control/prepare_task.py agent-control/worker.py agent-control/monitor.py
     - python agent-control/validate_queue.py agent-control/queue.json
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
     - when: always
 
 android-debug-apk:
@@ -64,6 +66,7 @@ project-hourly-monitor:
   stage: monitor
   image: python:3.12-slim
   script:
+    - python agent-control/validate_queue.py agent-control/queue.json
     - python agent-control/monitor.py
   artifacts:
     when: always
@@ -78,9 +81,6 @@ gitlab-ai-agent:
   image: python:3.12-slim
   timeout: 30m
   resource_group: mobile-ai-agent-serial
-  before_script:
-    - apt-get update && apt-get install -y --no-install-recommends git
-    - python -m pip install --no-cache-dir aider-chat
   script:
     - python agent-control/worker.py
   rules:

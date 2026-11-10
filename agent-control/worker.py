@@ -3,6 +3,8 @@
 import base64
 import json
 import os
+import shutil
+import importlib.util
 import subprocess
 import sys
 import urllib.error
@@ -32,6 +34,15 @@ def main():
     required = ["CI_API_V4_URL", "CI_PROJECT_ID", "CI_PROJECT_PATH", "CI_SERVER_HOST"]
     if not api_key or not token or any(not os.environ.get(key) for key in required):
         raise SystemExit("Missing required masked CI variables; no task was started")
+    queue_data = json.loads(__import__("pathlib").Path("agent-control/queue.json").read_text(encoding="utf-8"))
+    if not any(task.get("status") == "queued" for task in queue_data.get("tasks", [])):
+        print("No queued coding task; worker exits without installing tools or making changes.")
+        return
+    if not shutil.which("git"):
+        run(["apt-get", "update"])
+        run(["apt-get", "install", "-y", "--no-install-recommends", "git"])
+    if importlib.util.find_spec("aider") is None:
+        run([sys.executable, "-m", "pip", "install", "--no-cache-dir", "aider-chat"])
     prepared = json.loads(subprocess.check_output(
         [sys.executable, "agent-control/prepare_task.py"], text=True
     ))
