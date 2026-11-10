@@ -778,7 +778,7 @@ fun MainScreen() {
                 val visionEngine = activeEngine as? VisionInferenceEngine
                 val visionReady = hasVisualAttachments && visionEngine?.isVisionReady() == true
 
-                if (visionReady) {
+                if (visionReady && visionEngine != null) {
                     status = if (videoAttachments.isNotEmpty()) "Извлечение кадров видео и подготовка изображений…"
                         else "Подготовка изображений для локального анализа…"
                     val extractedVideoFrames = mutableListOf<ImageAttachmentSource>()
