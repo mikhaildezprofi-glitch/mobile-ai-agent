@@ -9,3 +9,12 @@ local.properties
 secrets.properties
 .polydev/
 .base/
+models/
+third_party/
+monitor_live.json
+monitor_status.json
+*.log
+*.pyc
+__pycache__/
+
+build_and_report.sh

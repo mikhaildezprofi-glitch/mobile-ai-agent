@@ -4,6 +4,7 @@ root = Path("third_party/llama.cpp/examples/llama.android/lib")
 cpp = root / "src/main/cpp/ai_chat.cpp"
 header = root / "src/main/cpp/logging.h"
 kt = root / "src/main/java/com/arm/aichat/internal/InferenceEngineImpl.kt"
+android_gradle = root / "build.gradle.kts"
 
 def replace_once(path, old, new):
     content = path.read_text()
@@ -95,4 +96,12 @@ replace_once(
                 }"""
 )
 
-print("Готово: добавлена передача нативной диагностики в Kotlin.")
+# Android NDK builds must not link the unsupported OpenMP runtime.
+# Without this option libggml-cpu.so can retain unresolved __kmpc_* symbols.
+replace_once(
+    android_gradle,
+    'arguments += "-DCMAKE_BUILD_TYPE=Release"',
+    'arguments += "-DCMAKE_BUILD_TYPE=Release"\n            arguments += "-DGGML_OPENMP=OFF"'
+)
+
+print("Готово: добавлена нативная диагностика и отключён OpenMP для Android NDK.")

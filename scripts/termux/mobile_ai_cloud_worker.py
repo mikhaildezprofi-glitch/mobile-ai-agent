@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/python
-import json, os, re, subprocess, sys, time
+import fcntl, json, os, re, subprocess, sys, time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,6 +44,30 @@ def run_quiet(command, timeout=8):
     except Exception as exc:
         return 127, type(exc).__name__
 
+def sync_queue():
+    """Synchronize without discarding locally committed results during outages."""
+    git("fetch", "origin", "agent-queue")
+    dirty = git("status", "--porcelain")
+    if dirty:
+        log("QUEUE sync deferred: local worktree contains uncommitted changes; preserving them")
+        return
+    counts = git("rev-list", "--left-right", "--count", "HEAD...origin/agent-queue")
+    ahead, behind = (int(value) for value in counts.split())
+    if ahead == 0 and behind == 0:
+        return
+    if ahead == 0:
+        git("merge", "--ff-only", "origin/agent-queue")
+    elif behind == 0:
+        git("push", "origin", "HEAD:agent-queue")
+    else:
+        try:
+            git("rebase", "origin/agent-queue")
+            git("push", "origin", "HEAD:agent-queue")
+        except Exception:
+            git("rebase", "--abort", check=False)
+            raise
+
+
 def heartbeat_due():
     try:
         last = float(HEARTBEAT_STATE.read_text(encoding="utf-8").strip())
@@ -63,7 +87,12 @@ def publish_heartbeat():
     wifi_connected = bool(wifi_info.get("ip")) and wifi_info.get("supplicant_state") == "COMPLETED"
     interface = "wifi" if wifi_connected else "cellular_or_unknown"
 
-    adb_code, adb_output = run_quiet(["adb", "devices", "-l"])
+    # Wireless ADB is intentionally isolated on port 5038 inside Ubuntu PRoot.
+    # The default Termux ADB server on 5037 is unrelated and must not be mistaken for it.
+    adb_code, adb_output = run_quiet([
+        "proot-distro", "login", "ubuntu", "--",
+        "/root/alt-adb/platform-tools/adb", "-P", "5038", "devices", "-l"
+    ], timeout=12)
     adb_state = "unavailable"
     adb_connected = False
     if adb_code == 0:
@@ -98,6 +127,9 @@ def publish_heartbeat():
     git("-c", "user.name=MOBILE AI Termux Worker",
         "-c", "user.email=termux-worker@users.noreply.github.com",
         "commit", "-m", "Update Android device heartbeat")
+    # Rate-limit heartbeat commits even while the network is temporarily offline.
+    # The unpushed commit is retained and sync_queue() retries it next cycle.
+    HEARTBEAT_STATE.write_text(str(time.time()), encoding="utf-8")
 
     try:
         git("push", "origin", "HEAD:agent-queue")
@@ -107,11 +139,9 @@ def publish_heartbeat():
             git("rebase", "origin/agent-queue")
         except Exception:
             git("rebase", "--abort", check=False)
-            git("reset", "--hard", "origin/agent-queue")
             raise
         git("push", "origin", "HEAD:agent-queue")
 
-    HEARTBEAT_STATE.write_text(str(time.time()), encoding="utf-8")
     log("HEARTBEAT pushed: wifi=%s interface=%s adb=%s monitor=%s" % (
         wifi_connected, interface, adb_state, monitor_code == 0
     ))
@@ -165,8 +195,7 @@ def main():
         raise RuntimeError("Queue worktree is not initialized")
     subprocess.run(["git", "config", "--global", "--add", "safe.directory", str(QUEUE)],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    git("fetch", "origin", "agent-queue")
-    git("reset", "--hard", "origin/agent-queue")
+    sync_queue()
     COMMANDS.mkdir(parents=True, exist_ok=True)
     RESULTS.mkdir(parents=True, exist_ok=True)
 
@@ -221,7 +250,10 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        # Serialize queue mutations with the monitor's event publisher.
+        with (HOME / ".mobile_ai_queue.lock").open("a", encoding="utf-8") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            main()
     except Exception as exc:
         log(f"WORKER ERROR: {type(exc).__name__}: {exc}")
         sys.exit(1)

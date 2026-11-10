@@ -12,8 +12,8 @@ android {
         applicationId = "com.mikhaildezprofi.mobileaiagent"
         minSdk = 33
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 20
+        versionName = "0.3.8"
     }
 
     buildTypes {
@@ -50,6 +50,7 @@ android {
 
 dependencies {
     implementation(project(":llama"))
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
