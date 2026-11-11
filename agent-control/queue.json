@@ -12,7 +12,7 @@
       "id": "audit-repo-source-sync",
       "title": "Сверить GitHub и GitLab, определить каноническую историю и безопасный план синхронизации",
       "role": "research",
-      "status": "blocked",
+      "status": "queued",
       "base_branch": "main",
       "allowed_paths": [
         "docs/GITLAB_PRIMARY_PLATFORM.md",
