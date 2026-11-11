@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: android-build-${ github.ref }
+  group: android-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -87,7 +87,7 @@ jobs:
               "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
               "apk_size": apk.stat().st_size
           }
-          pathlib.Path("build-metadata.json").write_text(json.dumps(data, indent=2) + "\n")
+          pathlib.Path("build-metadata.json").write_text(json.dumps(data, indent=2) + chr(10))
           print(json.dumps(data, indent=2))
           PY
 
@@ -105,17 +105,9 @@ jobs:
       - name: Publish immutable build release for GitLab and device pickup
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/sync/')
         env:
-          GH_TOKEN: ${ github.token }
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           TAG="build-${SOURCE_SHA:0:12}-${GITHUB_RUN_ID}"
-          gh release create "$TAG" \
-            app/build/outputs/apk/debug/app-debug.apk \
-            app-debug.apk.sha256 \
-            build-metadata.json \
-            --target "$TARGET_SHA" \
-            --title "MOBILE AI AGENT $TAG" \
-            --notes "Source GitLab commit: $SOURCE_SHA
-          GitHub workflow run: $GITHUB_RUN_ID
-          APK SHA-256 is attached."
+          gh release create "$TAG" app/build/outputs/apk/debug/app-debug.apk app-debug.apk.sha256 build-metadata.json --target "$TARGET_SHA" --title "MOBILE AI AGENT $TAG" --notes "Source GitLab commit: $SOURCE_SHA; GitHub workflow run: $GITHUB_RUN_ID; APK SHA-256 is attached."
