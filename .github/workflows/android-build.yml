@@ -1,0 +1,113 @@
+name: Android APK Build
+
+on:
+  push:
+    branches: [ main, 'sync/**' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workflow repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set source commit for build
+        shell: bash
+        run: |
+          echo "SOURCE_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+          echo "TARGET_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+
+      - name: Checkout llama.cpp Android engine
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 3de52ac38818978d6da8f386eda43a856e53714a
+          path: third_party/llama.cpp
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK, NDK and CMake
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.13113456" "cmake;3.31.6"
+          sed -i 's/listOf("arm64-v8a", "x86_64")/listOf("arm64-v8a")/' third_party/llama.cpp/examples/llama.android/lib/build.gradle.kts
+
+      - name: Patch llama.cpp native diagnostics
+        run: python3 scripts/patch-llama-diagnostics.py
+
+      - name: Build debug APK
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Create verified build metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          sha256sum "$APK" > app-debug.apk.sha256
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re
+          gradle = pathlib.Path("app/build.gradle.kts").read_text()
+          code = re.search(r"versionCode\s*=\s*(\d+)", gradle)
+          name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
+          apk = pathlib.Path("app/build/outputs/apk/debug/app-debug.apk")
+          data = {
+              "source_commit": os.environ["SOURCE_SHA"],
+              "github_build_commit": os.environ["TARGET_SHA"],
+              "github_workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "github_run_number": os.environ["GITHUB_RUN_NUMBER"],
+              "version_code": int(code.group(1)) if code else None,
+              "version_name": name.group(1) if name else None,
+              "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
+              "apk_size": apk.stat().st_size
+          }
+          pathlib.Path("build-metadata.json").write_text(json.dumps(data, indent=2) + chr(10))
+          print(json.dumps(data, indent=2))
+          PY
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-ai-agent-debug-apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app-debug.apk.sha256
+            build-metadata.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish immutable build release for GitLab and device pickup
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/sync/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="build-${SOURCE_SHA:0:12}-${GITHUB_RUN_ID}"
+          gh release create "$TAG" app/build/outputs/apk/debug/app-debug.apk app-debug.apk.sha256 build-metadata.json --target "$TARGET_SHA" --title "MOBILE AI AGENT $TAG" --notes "Source GitLab commit: $SOURCE_SHA; GitHub workflow run: $GITHUB_RUN_ID; APK SHA-256 is attached."
