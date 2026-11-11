@@ -26,4 +26,6 @@ github-apk-sync:
       - artifacts/github/
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^sync\//'
+      when: manual
+      allow_failure: true
     - when: never
