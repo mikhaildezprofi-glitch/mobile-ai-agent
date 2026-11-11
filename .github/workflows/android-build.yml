@@ -2,7 +2,7 @@ name: Android APK Build
 
 on:
   push:
-    branches: [ main, 'sync/**' ]
+    branches: [ 'sync/**' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -76,14 +76,18 @@ jobs:
           gradle = pathlib.Path("app/build.gradle.kts").read_text()
           code = re.search(r"versionCode\s*=\s*(\d+)", gradle)
           name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
+          suffix = re.search(r'versionNameSuffix\s*=\s*"([^"]+)"', gradle)
           apk = pathlib.Path("app/build/outputs/apk/debug/app-debug.apk")
+          version_name = name.group(1) if name else None
+          if version_name and suffix:
+              version_name += suffix.group(1)
           data = {
               "source_commit": os.environ["SOURCE_SHA"],
               "github_build_commit": os.environ["TARGET_SHA"],
               "github_workflow_run_id": os.environ["GITHUB_RUN_ID"],
               "github_run_number": os.environ["GITHUB_RUN_NUMBER"],
               "version_code": int(code.group(1)) if code else None,
-              "version_name": name.group(1) if name else None,
+              "version_name": version_name,
               "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
               "apk_size": apk.stat().st_size
           }
@@ -102,8 +106,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish immutable build release for GitLab and device pickup
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/sync/')
+      - name: Publish per-build release for GitLab and device pickup
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && startsWith(github.ref, 'refs/heads/sync/')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
