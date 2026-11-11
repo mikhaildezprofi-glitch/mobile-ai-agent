@@ -66,6 +66,7 @@ import com.mikhaildezprofi.mobileaiagent.VideoFrameExtractor
 import com.mikhaildezprofi.mobileaiagent.AgentToolRegistry
 import com.mikhaildezprofi.mobileaiagent.SafeDocumentReader
 import com.mikhaildezprofi.mobileaiagent.GeminiApiKeyStore
+import com.mikhaildezprofi.mobileaiagent.InstalledGeminiBridge
 import com.mikhaildezprofi.mobileaiagent.AgentRuntimeConfig
 import com.mikhaildezprofi.mobileaiagent.RuntimeFiles
 import com.mikhaildezprofi.mobileaiagent.GenerationForegroundService
@@ -259,6 +260,8 @@ fun MainScreen() {
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val geminiKeyStore = remember { GeminiApiKeyStore(appContext) }
+    var geminiAppInstalled by remember { mutableStateOf(InstalledGeminiBridge.isInstalled(appContext)) }
+    var geminiAppStatus by remember { mutableStateOf("") }
     var geminiApiKeyDraft by remember { mutableStateOf("") }
     var geminiKeyConfigured by remember { mutableStateOf(geminiKeyStore.hasKey()) }
     var geminiKeyStatus by remember {
@@ -1317,6 +1320,52 @@ fun MainScreen() {
                     }
                     Text(geminiKeyStatus, style = MaterialTheme.typography.bodySmall)
                     Text("Gemini 3.5 Flash-Lite • бесплатный уровень при наличии квоты Google")
+                    HorizontalDivider()
+                    Text("Установленное приложение Gemini", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (geminiAppInstalled) "Gemini найден на устройстве."
+                        else "Приложение Gemini не обнаружено.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        TextButton(
+                            enabled = geminiAppInstalled,
+                            onClick = {
+                                geminiAppStatus = if (InstalledGeminiBridge.open(context)) {
+                                    "Gemini запущен. Ответ будет находиться в приложении Gemini."
+                                } else {
+                                    "Не удалось открыть Gemini. Проверьте установку приложения."
+                                }
+                            }
+                        ) { Text("Открыть Gemini") }
+                        TextButton(
+                            enabled = geminiAppInstalled && input.isNotBlank(),
+                            onClick = {
+                                geminiAppStatus = if (InstalledGeminiBridge.sharePrompt(context, input)) {
+                                    "Открылось системное меню передачи. Выберите Gemini вручную."
+                                } else {
+                                    "Не удалось открыть меню передачи запроса."
+                                }
+                            }
+                        ) { Text("Передать текущий запрос") }
+                    }
+                    TextButton(
+                        onClick = {
+                            geminiAppInstalled = InstalledGeminiBridge.isInstalled(appContext)
+                            geminiAppStatus = if (geminiAppInstalled) {
+                                "Проверка завершена: Gemini установлен."
+                            } else {
+                                "Проверка завершена: Gemini не найден."
+                            }
+                        }
+                    ) { Text("Проверить установку") }
+                    if (geminiAppStatus.isNotBlank()) {
+                        Text(geminiAppStatus, style = MaterialTheme.typography.bodySmall)
+                    }
                     HorizontalDivider()
                     Text("Системный промпт")
                     OutlinedTextField(
