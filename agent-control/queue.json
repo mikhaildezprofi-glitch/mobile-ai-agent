@@ -12,7 +12,7 @@
       "id": "audit-repo-source-sync",
       "title": "Сверить GitHub и GitLab, определить каноническую историю и безопасный план синхронизации",
       "role": "research",
-      "status": "queued",
+      "status": "in_review",
       "base_branch": "main",
       "allowed_paths": [
         "docs/GITLAB_PRIMARY_PLATFORM.md",
@@ -24,7 +24,9 @@
         "Разделить Android source, pinned llama.cpp, workflow files и runtime assets",
         "Предложить безопасную последовательность merge без force-push и без потери коммитов",
         "Не переносить APK, модели, секреты, ключи подписи или резервные копии"
-      ]
+      ],
+      "agent_branch": "agent/audit-repo-source-sync-manual",
+      "merge_request_iid": 9
     },
     {
       "id": "android-ui-review",
