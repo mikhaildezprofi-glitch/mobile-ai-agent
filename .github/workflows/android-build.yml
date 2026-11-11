@@ -6,11 +6,13 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
-  schedule:
-    - cron: '0 * * * *'
 
 permissions:
   contents: write
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -21,27 +23,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Sync canonical GitLab main (hourly)
-        if: github.event_name == 'schedule'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone --depth 1 --branch main https://gitlab.com/lenives777/mobile-ai-agent.git /tmp/gitlab-source
-          SOURCE_SHA="$(git -C /tmp/gitlab-source rev-parse HEAD)"
-          rsync -a --delete --exclude='.git' /tmp/gitlab-source/ ./
-          echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_ENV"
-          git config user.name "GitLab Source Sync"
-          git config user.email "gitlab-source-sync@users.noreply.github.com"
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "sync: mirror GitLab main $SOURCE_SHA"
-            git push origin HEAD:refs/heads/sync/gitlab-source
-          fi
-          TARGET_SHA="$(git rev-parse HEAD)"
-          echo "TARGET_SHA=$TARGET_SHA" >> "$GITHUB_ENV"
-
-      - name: Set source commit for push builds
-        if: github.event_name != 'schedule'
+      - name: Set source commit for build
         shell: bash
         run: |
           echo "SOURCE_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
@@ -92,8 +74,8 @@ jobs:
           python3 - <<'PY'
           import hashlib, json, os, pathlib, re
           gradle = pathlib.Path("app/build.gradle.kts").read_text()
-          code = re.search(r"versionCode\s*=\s*(\d+)", gradle)
-          name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
+          code = re.search(r"versionCode\\s*=\\s*(\\d+)", gradle)
+          name = re.search(r'versionName\\s*=\\s*"([^"]+)"', gradle)
           apk = pathlib.Path("app/build/outputs/apk/debug/app-debug.apk")
           data = {
               "source_commit": os.environ["SOURCE_SHA"],
@@ -105,7 +87,7 @@ jobs:
               "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
               "apk_size": apk.stat().st_size
           }
-          pathlib.Path("build-metadata.json").write_text(json.dumps(data, indent=2) + "\n")
+          pathlib.Path("build-metadata.json").write_text(json.dumps(data, indent=2) + "\\n")
           print(json.dumps(data, indent=2))
           PY
 
@@ -121,19 +103,19 @@ jobs:
           retention-days: 30
 
       - name: Publish immutable build release for GitLab and device pickup
-        if: (github.event_name == 'schedule') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/sync/'))
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/sync/')
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          TAG="build-\${SOURCE_SHA:0:12}-\${GITHUB_RUN_ID}"
-          gh release create "$TAG" \
-            app/build/outputs/apk/debug/app-debug.apk \
-            app-debug.apk.sha256 \
-            build-metadata.json \
-            --target "$TARGET_SHA" \
-            --title "MOBILE AI AGENT $TAG" \
+          TAG="build-${SOURCE_SHA:0:12}-${GITHUB_RUN_ID}"
+          gh release create "$TAG" \\
+            app/build/outputs/apk/debug/app-debug.apk \\
+            app-debug.apk.sha256 \\
+            build-metadata.json \\
+            --target "$TARGET_SHA" \\
+            --title "MOBILE AI AGENT $TAG" \\
             --notes "Source GitLab commit: $SOURCE_SHA
           GitHub workflow run: $GITHUB_RUN_ID
           APK SHA-256 is attached."
