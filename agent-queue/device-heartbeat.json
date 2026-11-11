@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "checked_at": "2026-11-11T06:58:02+00:00",
+  "checked_at": "2026-11-11T07:13:27+00:00",
   "termux_worker_running": true,
   "monitor_running": true,
   "wifi_connected": true,
   "network_interface": "wifi",
-  "adb_connected": false,
-  "adb_state": "no-device",
+  "adb_connected": true,
+  "adb_state": "device",
   "project_accessible": true,
   "executor": "termux-cloud-worker"
 }
