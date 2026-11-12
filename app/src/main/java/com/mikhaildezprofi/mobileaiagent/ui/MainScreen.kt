@@ -71,6 +71,7 @@ import com.mikhaildezprofi.mobileaiagent.GeminiCloudProvider
 import com.mikhaildezprofi.mobileaiagent.InstalledGeminiBridge
 import com.mikhaildezprofi.mobileaiagent.AgentRuntimeConfig
 import com.mikhaildezprofi.mobileaiagent.RuntimeFiles
+import com.mikhaildezprofi.mobileaiagent.RuntimeConfigUpdater
 import com.mikhaildezprofi.mobileaiagent.GenerationForegroundService
 import com.mikhaildezprofi.mobileaiagent.BackgroundGenerationController
 import com.mikhaildezprofi.mobileaiagent.DevicePerformanceMonitor
@@ -319,6 +320,7 @@ fun MainScreen() {
     var systemPrompt by remember { mutableStateOf(runtimeFiles.systemPrompt) }
     var promptDraft by remember { mutableStateOf(systemPrompt) }
     var configDraft by remember { mutableStateOf(runtimeConfig) }
+    var runtimeUpdateInProgress by remember { mutableStateOf(false) }
 
     val messages = ChatSessionState.messages
     val chatHistory = remember { mutableStateListOf<SavedChat>().apply { addAll(loadSavedChats(appContext)) } }
@@ -1586,6 +1588,38 @@ fun MainScreen() {
                             onCheckedChange = { configDraft = configDraft.copy(diagnosticsEnabled = it) }
                         )
                         Text("Диагностика")
+                    }
+                    TextButton(
+                        enabled = !runtimeUpdateInProgress,
+                        onClick = {
+                            runtimeUpdateInProgress = true
+                            scope.launch {
+                                try {
+                                    val result = RuntimeConfigUpdater.downloadAndApply(appContext)
+                                    val loaded = RuntimeFiles.load(appContext)
+                                    runtimeFiles = loaded
+                                    runtimeConfig = loaded.config
+                                    configDraft = loaded.config
+                                    if (result.promptApplied) {
+                                        systemPrompt = loaded.systemPrompt
+                                        promptDraft = loaded.systemPrompt
+                                        engine?.let { active ->
+                                            withContext(Dispatchers.IO) {
+                                                if (modelReady) active.setSystemPrompt(loaded.systemPrompt)
+                                            }
+                                        }
+                                    }
+                                    status = "Конфигурация ${result.version} проверена SHA-256 и загружена (${result.downloadedFiles} файлов)." +
+                                        if (result.promptApplied) " Основной промпт применён." else " Ваш пользовательский промпт сохранён."
+                                } catch (error: Exception) {
+                                    status = "Обновление конфигурации не выполнено: ${error.message ?: error.javaClass.simpleName}"
+                                } finally {
+                                    runtimeUpdateInProgress = false
+                                }
+                            }
+                        }
+                    ) {
+                        Text(if (runtimeUpdateInProgress) "Загрузка и проверка…" else "Скачать обновления конфигурации")
                     }
                     TextButton(
                         onClick = {
