@@ -3,8 +3,30 @@ name: Android APK Build
 on:
   push:
     branches: [ 'sync/**' ]
+    paths:
+      - 'app/**'
+      - 'llama/**'
+      - 'gradle/**'
+      - 'third_party/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'scripts/patch-llama-diagnostics.py'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'app/**'
+      - 'llama/**'
+      - 'gradle/**'
+      - 'third_party/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'scripts/patch-llama-diagnostics.py'
   workflow_dispatch:
 
 permissions:
@@ -77,7 +99,7 @@ jobs:
           "$APKSIGNER" verify --verbose "$APK"
           CERT_OUTPUT="$("$APKSIGNER" verify --print-certs "$APK")"
           printf '%s\n' "$CERT_OUTPUT"
-          SIGNER_SHA256="$(printf '%s\n' "$CERT_OUTPUT" | sed -n 's/.*Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          SIGNER_SHA256="$(printf '%s\n' "$CERT_OUTPUT" | sed -n 's/.*Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d '[:space:]: ' | tr '[:upper:]' '[:lower:]')"
           if [ -z "$SIGNER_SHA256" ]; then
             echo "Could not extract APK signer certificate SHA-256 fingerprint." >&2
             exit 1
@@ -93,9 +115,9 @@ jobs:
           python3 - <<'PY'
           import hashlib, json, os, pathlib, re
           gradle = pathlib.Path("app/build.gradle.kts").read_text()
-          code = re.search(r"versionCode\s*=\s*(\d+)", gradle)
-          name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
-          suffix = re.search(r'versionNameSuffix\s*=\s*"([^"]+)"', gradle)
+          code = re.search(r"versionCode\\s*=\\s*(\\d+)", gradle)
+          name = re.search(r'versionName\\s*=\\s*"([^"]+)"', gradle)
+          suffix = re.search(r'versionNameSuffix\\s*=\\s*"([^"]+)"', gradle)
           apk = pathlib.Path("app/build/outputs/apk/debug/app-debug.apk")
           version_name = name.group(1) if name else None
           if version_name and suffix:
