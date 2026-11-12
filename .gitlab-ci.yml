@@ -5,12 +5,31 @@ workflow:
   auto_cancel:
     on_new_commit: interruptible
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^sync\//'
     - when: never
 
 variables:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONDONTWRITEBYTECODE: "1"
+
+github-repository-dispatch:
+  stage: build
+  image: curlimages/curl:8.12.1
+  interruptible: true
+  script:
+    - |
+      set -eu
+      curl --fail --silent --show-error \
+        --request POST \
+        --header "Accept: application/vnd.github+json" \
+        --header "Authorization: Bearer ${GH_DISPATCH_TOKEN}" \
+        --header "X-GitHub-Api-Version: 2022-11-28" \
+        --data "{\"event_type\":\"gitlab-main-updated\",\"client_payload\":{\"sha\":\"$CI_COMMIT_SHA\"}}" \
+        https://api.github.com/repos/mikhaildezprofi-glitch/mobile-ai-agent/dispatches
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main" && $GH_DISPATCH_TOKEN'
+    - when: never
 
 github-apk-sync:
   stage: build
