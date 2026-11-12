@@ -54,12 +54,28 @@ jobs:
           GH_SYNC_SHA="$(git ls-remote origin refs/heads/sync/current | awk '{print $1}')"
           if [[ "$GH_SYNC_SHA" != "$SOURCE_SHA" ]]; then
             git push --force origin "${SOURCE_SHA}:refs/heads/sync/current"
-            echo "Build ref sync/current updated to ${SOURCE_SHA}"
+            echo "Build/config ref sync/current updated to ${SOURCE_SHA}"
           else
-            echo "Build ref sync/current already matches ${SOURCE_SHA}"
+            echo "Build/config ref sync/current already matches ${SOURCE_SHA}"
           fi
 
           echo "SOURCE_SHA=${SOURCE_SHA}" >> "$GITHUB_ENV"
+          echo "GH_MAIN_SHA=${GH_MAIN_SHA}" >> "$GITHUB_ENV"
+
+      - name: Validate runtime configuration bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git cat-file -e "${SOURCE_SHA}:scripts/validate-runtime-config.py" 2>/dev/null; then
+            git show "${SOURCE_SHA}:scripts/validate-runtime-config.py" > /tmp/validate-runtime-config.py
+            mkdir -p /tmp/runtime-config-check
+            git archive "${SOURCE_SHA}" runtime-config | tar -x -C /tmp/runtime-config-check
+            cp /tmp/validate-runtime-config.py /tmp/runtime-config-check/scripts-validator.py
+            sed -i 's|ROOT = Path(__file__).resolve().parents\[1\] / "runtime-config"|ROOT = Path(__file__).resolve().parent / "runtime-config"|' /tmp/runtime-config-check/scripts-validator.py
+            python3 /tmp/runtime-config-check/scripts-validator.py
+          else
+            echo "No runtime config bundle in this source revision; skipping."
+          fi
 
       - name: Verify GitLab source is build-ready
         id: readiness
@@ -78,8 +94,47 @@ jobs:
           fi
           echo "build_ready=true" >> "$GITHUB_OUTPUT"
 
-      - name: Check release and existing build attempts
+      - name: Detect Android build-affecting changes since last release
         if: steps.readiness.outputs.build_ready == 'true'
+        id: build_impact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          LAST_RELEASE_TAG="$(gh release list --limit 1 --json tagName --jq '.[0].tagName // empty')"
+          BASE_SHA=""
+          LAST_BUILT_PREFIX="$(printf '%s' "$LAST_RELEASE_TAG" | sed -n 's/^build-\([0-9a-f]\{12\}\)-.*/\1/p')"
+          if [[ -n "$LAST_BUILT_PREFIX" ]]; then
+            git fetch origin "refs/tags/$LAST_RELEASE_TAG:refs/tags/$LAST_RELEASE_TAG" || true
+            BASE_SHA="$(git rev-parse "${LAST_BUILT_PREFIX}^{commit}" 2>/dev/null || true)"
+          fi
+          if [[ -z "$BASE_SHA" ]]; then
+            BASE_SHA="$GH_MAIN_SHA"
+          fi
+
+          echo "Comparison base: $BASE_SHA"
+          CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$SOURCE_SHA")"
+          printf '%s\n' "$CHANGED_FILES"
+
+          BUILD_REQUIRED=false
+          while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
+            case "$path" in
+              app/*|llama/*|gradle/*|third_party/*|build.gradle.kts|settings.gradle.kts|gradle.properties|gradlew|gradlew.bat|scripts/patch-llama-diagnostics.py)
+                BUILD_REQUIRED=true
+                ;;
+            esac
+          done <<< "$CHANGED_FILES"
+
+          echo "build_required=$BUILD_REQUIRED" >> "$GITHUB_OUTPUT"
+          echo "baseline_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          if [[ "$BUILD_REQUIRED" == "false" ]]; then
+            echo "Only runtime data/docs or non-APK files changed. Android build is skipped."
+          fi
+
+      - name: Check release and existing build attempts
+        if: steps.readiness.outputs.build_ready == 'true' && steps.build_impact.outputs.build_required == 'true'
         id: build_check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -88,7 +143,7 @@ jobs:
           set -euo pipefail
           PREFIX="build-${SOURCE_SHA:0:12}-"
 
-          RELEASE="$(gh release list --limit 100 --json tagName --jq ".[] | select(.tagName | startswith(\"$PREFIX\")) | .tagName" || true)"
+          RELEASE="$(gh release list --limit 100 --json tagName | jq -r --arg prefix "$PREFIX" '.[] | select(.tagName | startswith($prefix)) | .tagName' || true)"
           if [[ -n "$RELEASE" ]]; then
             echo "dispatch=false" >> "$GITHUB_OUTPUT"
             echo "A release already exists for source ${SOURCE_SHA}."
@@ -113,7 +168,7 @@ jobs:
           echo "dispatch=true" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch Android APK build
-        if: steps.readiness.outputs.build_ready == 'true' && steps.build_check.outputs.dispatch == 'true'
+        if: steps.readiness.outputs.build_ready == 'true' && steps.build_impact.outputs.build_required == 'true' && steps.build_check.outputs.dispatch == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run android-build.yml --ref sync/current

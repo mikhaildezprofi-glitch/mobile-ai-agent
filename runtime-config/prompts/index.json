@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "default": "assistant_ru",
+  "profiles": [
+    { "id": "assistant_ru", "file": "assistant_ru.txt", "description": "Основной русскоязычный мобильный помощник" },
+    { "id": "coding_ru", "file": "coding_ru.txt", "description": "Программирование и отладка" },
+    { "id": "vision_ru", "file": "vision_ru.txt", "description": "Анализ изображений и видео" },
+    { "id": "voice_ru", "file": "voice_ru.txt", "description": "Голосовой диалог" }
+  ]
+}
