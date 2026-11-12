@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate the non-executable MOBILE AI AGENT runtime configuration bundle."""
 import json
+import hashlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / "runtime-config"
@@ -21,6 +22,19 @@ def main():
     require(manifest.get("channel") == "stable", "Unexpected release channel")
     require(manifest.get("security", {}).get("containsSecrets") is False, "Remote config must not contain secrets")
     require(manifest.get("security", {}).get("remoteCodeAllowed") is False, "Remote executable code must stay disabled")
+
+    files = manifest.get("files", {})
+    hashes = manifest.get("sha256", {})
+    require(isinstance(files, dict) and isinstance(hashes, dict), "Manifest file/hash maps are required")
+    required_files = set(files.values())
+    require(required_files <= set(hashes), "Every manifest file must have a SHA-256 digest")
+    for relative in required_files:
+        path = (ROOT / relative).resolve()
+        require(ROOT.resolve() in path.parents and path.is_file(), f"Missing or unsafe manifest file: {relative}")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        require(digest == hashes.get(relative), f"SHA-256 mismatch: {relative}")
+    require(all(isinstance(value, str) and len(value) == 64 for value in hashes.values()),
+            "Malformed SHA-256 digest in manifest")
 
     ui = load_json("ui.json")
     require(1 <= int(ui.get("inputMaxLines", 1)) <= 3, "inputMaxLines must be 1..3")
