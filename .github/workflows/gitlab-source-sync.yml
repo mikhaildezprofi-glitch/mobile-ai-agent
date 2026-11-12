@@ -82,7 +82,7 @@ jobs:
         if: steps.readiness.outputs.build_ready == 'true'
         id: build_check
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_SYNC_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -115,5 +115,5 @@ jobs:
       - name: Dispatch Android APK build
         if: steps.readiness.outputs.build_ready == 'true' && steps.build_check.outputs.dispatch == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_SYNC_TOKEN }}
         run: gh workflow run android-build.yml --ref sync/current
