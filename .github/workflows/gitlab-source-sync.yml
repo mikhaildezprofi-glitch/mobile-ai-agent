@@ -3,8 +3,10 @@ name: GitLab Canonical Sync
 on:
   push:
     branches: [ main ]
+  repository_dispatch:
+    types: [ gitlab-main-updated ]
   schedule:
-    - cron: '17 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
