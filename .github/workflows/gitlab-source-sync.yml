@@ -104,9 +104,10 @@ jobs:
           set -euo pipefail
           LAST_RELEASE_TAG="$(gh release list --limit 1 --json tagName --jq '.[0].tagName // empty')"
           BASE_SHA=""
-          if [[ "$LAST_RELEASE_TAG" =~ ^build-([0-9a-f]{12})- ]]; then
+          LAST_BUILT_PREFIX="$(printf '%s' "$LAST_RELEASE_TAG" | sed -n 's/^build-\([0-9a-f]\{12\}\)-.*/\1/p')"
+          if [[ -n "$LAST_BUILT_PREFIX" ]]; then
             git fetch origin "refs/tags/$LAST_RELEASE_TAG:refs/tags/$LAST_RELEASE_TAG" || true
-            BASE_SHA="$(git rev-parse "${BASH_REMATCH[1]}^{commit}" 2>/dev/null || true)"
+            BASE_SHA="$(git rev-parse "${LAST_BUILT_PREFIX}^{commit}" 2>/dev/null || true)"
           fi
           if [[ -z "$BASE_SHA" ]]; then
             BASE_SHA="$GH_MAIN_SHA"
@@ -142,7 +143,7 @@ jobs:
           set -euo pipefail
           PREFIX="build-${SOURCE_SHA:0:12}-"
 
-          RELEASE="$(gh release list --limit 100 --json tagName --jq ".[] | select(.tagName | startswith(\\"$PREFIX\\")) | .tagName" || true)"
+          RELEASE="$(gh release list --limit 100 --json tagName | jq -r --arg prefix "$PREFIX" '.[] | select(.tagName | startswith($prefix)) | .tagName' || true)"
           if [[ -n "$RELEASE" ]]; then
             echo "dispatch=false" >> "$GITHUB_OUTPUT"
             echo "A release already exists for source ${SOURCE_SHA}."
