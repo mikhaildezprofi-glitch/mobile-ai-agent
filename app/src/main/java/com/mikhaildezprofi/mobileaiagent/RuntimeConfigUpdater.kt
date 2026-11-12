@@ -51,7 +51,9 @@ object RuntimeConfigUpdater {
         val relativePaths = linkedSetOf<String>()
         val requiredKeys = listOf(
             "ui", "modules", "models", "routing", "prompts", "commands",
-            "responseProfiles", "privacy", "voice", "network", "diagnostics"
+            "responseProfiles", "privacy", "voice", "network", "diagnostics",
+            "promptAssistant", "promptCoding", "promptVision", "promptVoice",
+            "promptResearch", "promptPlanning", "promptConcise"
         )
         requiredKeys.forEach { key ->
             val path = files.optString(key)
