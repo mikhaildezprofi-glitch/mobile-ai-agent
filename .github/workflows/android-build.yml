@@ -115,7 +115,7 @@ jobs:
           python3 - <<'PY'
           import hashlib, json, os, pathlib, re
           gradle = pathlib.Path("app/build.gradle.kts").read_text()
-          code = re.search(r"versionCode\s*=\s*(\\d+)", gradle)
+          code = re.search(r"versionCode\s*=\s*(\d+)", gradle)
           name = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
           suffix = re.search(r'versionNameSuffix\s*=\s*"([^"]+)"', gradle)
           apk = pathlib.Path("app/build/outputs/apk/debug/app-debug.apk")
