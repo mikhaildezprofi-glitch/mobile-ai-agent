@@ -20,7 +20,14 @@
     "privacy": "privacy.json",
     "voice": "voice.json",
     "network": "network.json",
-    "diagnostics": "diagnostics.json"
+    "diagnostics": "diagnostics.json",
+    "promptAssistant": "prompts/assistant_ru.txt",
+    "promptCoding": "prompts/coding_ru.txt",
+    "promptVision": "prompts/vision_ru.txt",
+    "promptVoice": "prompts/voice_ru.txt",
+    "promptResearch": "prompts/research_ru.txt",
+    "promptPlanning": "prompts/planning_ru.txt",
+    "promptConcise": "prompts/concise_ru.txt"
   },
   "rollback": {
     "supported": true,
