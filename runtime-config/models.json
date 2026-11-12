@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "defaultLocalModel": "qwen3-1.7b-q4_k_m",
+  "models": [
+    {
+      "id": "qwen3-1.7b-q4_k_m",
+      "provider": "local",
+      "displayName": "Qwen3 1.7B Q4_K_M",
+      "fileName": "Qwen3-1.7B-Q4_K_M.gguf",
+      "expectedApproxBytes": 1288490189,
+      "enabled": true,
+      "role": ["general", "code_fallback"],
+      "requiresDownload": false
+    },
+    {
+      "id": "gemini-3.5-flash-lite",
+      "provider": "google_gemini",
+      "displayName": "Gemini Flash Lite",
+      "modelId": "gemini-3.5-flash-lite",
+      "enabled": true,
+      "role": ["general", "code", "complex_reasoning"],
+      "requiresApiKey": true
+    },
+    {
+      "id": "smolvlm-500m-instruct-q8_0",
+      "provider": "local_vision",
+      "displayName": "SmolVLM 500M Q8_0",
+      "fileName": "SmolVLM-500M-Instruct-Q8_0.gguf",
+      "enabled": false,
+      "role": ["image_analysis"],
+      "requiresProjector": true,
+      "requiresDownload": true
+    }
+  ],
+  "downloadPolicy": {
+    "wifiRecommended": true,
+    "requireSha256": true,
+    "neverDeleteExistingModelAutomatically": true
+  }
+}

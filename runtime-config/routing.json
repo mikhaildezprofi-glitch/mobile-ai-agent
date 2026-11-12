@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "defaultMode": "hybrid",
+  "fallbackToLocal": true,
+  "cloudPreferredTasks": ["general", "code", "complex_reasoning"],
+  "localOnlyTasks": ["file_analysis", "image_analysis", "device_action"],
+  "currentInformation": {
+    "provider": "none",
+    "enabled": false,
+    "note": "A real web-search provider must be integrated in the APK before enabling."
+  },
+  "privacy": {
+    "cloudUploadsRequireExplicitUserAction": true,
+    "attachmentsCloudUploadDefault": false,
+    "apiKeysNeverStoredInRemoteConfig": true
+  },
+  "generation": {
+    "localMaxTokens": 512,
+    "cloudMaxTokens": 2048,
+    "requestTimeoutSeconds": 60
+  }
+}

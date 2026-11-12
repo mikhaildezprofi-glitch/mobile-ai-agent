@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "configVersion": "2026.11.13.1",
+  "channel": "stable",
+  "minimumAppVersion": "0.4.1",
+  "generatedAt": "2026-11-13T00:00:00Z",
+  "defaultProfile": "assistant_ru",
+  "files": {
+    "ui": "ui.json",
+    "modules": "modules.json",
+    "models": "models.json",
+    "routing": "routing.json",
+    "prompts": "prompts/index.json",
+    "commands": "commands.json"
+  },
+  "rollback": {
+    "supported": true,
+    "keepLastKnownGood": true
+  },
+  "security": {
+    "containsSecrets": false,
+    "remoteCodeAllowed": false,
+    "remoteExecutableContentAllowed": false
+  }
+}
