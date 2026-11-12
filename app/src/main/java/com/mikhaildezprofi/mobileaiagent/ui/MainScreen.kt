@@ -67,6 +67,7 @@ import com.mikhaildezprofi.mobileaiagent.VideoFrameExtractor
 import com.mikhaildezprofi.mobileaiagent.AgentToolRegistry
 import com.mikhaildezprofi.mobileaiagent.SafeDocumentReader
 import com.mikhaildezprofi.mobileaiagent.GeminiApiKeyStore
+import com.mikhaildezprofi.mobileaiagent.GeminiCloudProvider
 import com.mikhaildezprofi.mobileaiagent.InstalledGeminiBridge
 import com.mikhaildezprofi.mobileaiagent.AgentRuntimeConfig
 import com.mikhaildezprofi.mobileaiagent.RuntimeFiles
@@ -265,6 +266,8 @@ fun MainScreen() {
     var geminiAppStatus by remember { mutableStateOf("") }
     var geminiApiKeyDraft by remember { mutableStateOf("") }
     var geminiKeyConfigured by remember { mutableStateOf(geminiKeyStore.hasKey()) }
+    var geminiTestBusy by remember { mutableStateOf(false) }
+    var geminiTestStatus by remember { mutableStateOf("") }
     var geminiKeyStatus by remember {
         mutableStateOf(if (geminiKeyStore.hasKey()) "Ключ сохранён в Android Keystore." else "Ключ не настроен.")
     }
@@ -1451,6 +1454,7 @@ fun MainScreen() {
                                         withContext(Dispatchers.IO) { geminiKeyStore.save(keyToSave) }
                                         geminiApiKeyDraft = ""
                                         geminiKeyConfigured = true
+                                        geminiTestStatus = ""
                                         geminiKeyStatus = "Ключ сохранён в Android Keystore."
                                         status = "Gemini API-ключ сохранён."
                                     } catch (error: Exception) {
@@ -1460,12 +1464,13 @@ fun MainScreen() {
                             }
                         ) { Text("Сохранить ключ") }
                         TextButton(
-                            enabled = geminiKeyConfigured,
+                            enabled = geminiKeyConfigured && !geminiTestBusy,
                             onClick = {
                                 scope.launch {
                                     withContext(Dispatchers.IO) { geminiKeyStore.clear() }
                                     geminiApiKeyDraft = ""
                                     geminiKeyConfigured = false
+                                    geminiTestStatus = ""
                                     geminiKeyStatus = "Ключ удалён с устройства."
                                     status = "Gemini API-ключ удалён."
                                 }
@@ -1473,6 +1478,27 @@ fun MainScreen() {
                         ) { Text("Удалить ключ") }
                     }
                     Text(geminiKeyStatus, style = MaterialTheme.typography.bodySmall)
+                    TextButton(
+                        enabled = geminiKeyConfigured && !geminiTestBusy,
+                        onClick = {
+                            geminiTestBusy = true
+                            geminiTestStatus = "Проверка ключа и доступности модели…"
+                            scope.launch {
+                                try {
+                                    geminiTestStatus = GeminiCloudProvider(geminiKeyStore).testConnection()
+                                } catch (error: Exception) {
+                                    geminiTestStatus = "Проверка не пройдена: ${error.message ?: error.javaClass.simpleName}"
+                                } finally {
+                                    geminiTestBusy = false
+                                }
+                            }
+                        }
+                    ) {
+                        Text(if (geminiTestBusy) "Проверяем…" else "Проверить подключение Gemini")
+                    }
+                    if (geminiTestStatus.isNotBlank()) {
+                        Text(geminiTestStatus, style = MaterialTheme.typography.bodySmall)
+                    }
                     Text("Gemini 3.5 Flash-Lite • бесплатный уровень при наличии квоты Google")
                     HorizontalDivider()
                     Text("Установленное приложение Gemini", fontWeight = FontWeight.SemiBold)

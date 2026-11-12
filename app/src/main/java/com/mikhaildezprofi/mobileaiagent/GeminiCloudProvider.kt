@@ -19,6 +19,15 @@ class GeminiCloudProvider(
     override val id: String = "Google Gemini API"
     override val isAvailable: Boolean get() = keyStore.hasKey()
 
+    /** Makes a small real generateContent request so the UI can verify key + model access. */
+    suspend fun testConnection(): String = withContext(Dispatchers.IO) {
+        val key = keyStore.read()
+            ?: throw IllegalStateException("Gemini API-ключ не настроен или не может быть расшифрован.")
+        val answer = request("Ответь одним словом: OK.", 64, key).trim()
+        if (answer.isBlank()) throw IllegalStateException("Gemini вернул пустой ответ при проверке.")
+        "Подключение подтверждено. Ответ Gemini: ${answer.take(80)}"
+    }
+
     override fun generate(prompt: String, maxTokens: Int): Flow<String> = flow {
         val key = keyStore.read()
             ?: throw IllegalStateException("Gemini API-ключ не настроен или не может быть расшифрован.")
