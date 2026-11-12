@@ -259,6 +259,9 @@ private fun addAttachmentsSafely(
 fun MainScreen() {
     val context = LocalContext.current
     val appContext = context.applicationContext
+    val appVersion = remember(appContext) {
+        appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: "неизвестна"
+    }
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val geminiKeyStore = remember { GeminiApiKeyStore(appContext) }
@@ -1649,7 +1652,7 @@ fun MainScreen() {
             title = { Text("Диагностика") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Версия 0.2.0 • llama.cpp • GGUF • Android arm64-v8a")
+                    Text("Версия $appVersion • llama.cpp • GGUF • Android arm64-v8a")
                     Text(status)
                     Text("Производительность устройства", fontWeight = FontWeight.SemiBold)
                     SelectionContainer {
