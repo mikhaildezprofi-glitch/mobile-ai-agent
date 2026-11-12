@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "runtimeConfig": {
+    "enabled": true,
+    "checkOnLaunch": false,
+    "refreshIntervalHours": 24,
+    "connectTimeoutSeconds": 10,
+    "readTimeoutSeconds": 20,
+    "maxBundleBytes": 262144,
+    "useLastKnownGoodWhenOffline": true
+  },
+  "timeouts": {
+    "connectSeconds": 15,
+    "readSeconds": 60
+  },
+  "retry": {
+    "maxAttempts": 2,
+    "initialDelaySeconds": 2,
+    "exponentialBackoff": true
+  }
+}

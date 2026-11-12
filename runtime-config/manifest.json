@@ -15,7 +15,12 @@
     "models": "models.json",
     "routing": "routing.json",
     "prompts": "prompts/index.json",
-    "commands": "commands.json"
+    "commands": "commands.json",
+    "responseProfiles": "response_profiles.json",
+    "privacy": "privacy.json",
+    "voice": "voice.json",
+    "network": "network.json",
+    "diagnostics": "diagnostics.json"
   },
   "rollback": {
     "supported": true,

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "input": {
+    "enabled": true,
+    "provider": "android_speech_recognizer",
+    "language": "ru-RU",
+    "mode": "push_to_talk"
+  },
+  "wakeWord": {
+    "enabled": false,
+    "phrase": "Джимми",
+    "engine": "vosk",
+    "model": "vosk-model-small-ru-0.22",
+    "modelDownloadRequired": true,
+    "requiresForegroundService": true
+  },
+  "continuousConversation": {
+    "enabled": false,
+    "silenceTimeoutSeconds": 12,
+    "returnToWakeMode": true
+  },
+  "output": {
+    "textToSpeechEnabled": false,
+    "provider": "android_tts",
+    "language": "ru-RU"
+  }
+}
