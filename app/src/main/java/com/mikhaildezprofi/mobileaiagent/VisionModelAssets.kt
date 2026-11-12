@@ -11,6 +11,9 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /** Downloads the official SmolVLM GGUF pair and verifies SHA-256 before use. */
 object VisionModelAssets {
@@ -141,10 +144,16 @@ object VisionModelAssets {
             check(actualHash.equals(expectedSha256, ignoreCase = true)) {
                 "SHA-256 не совпал для $name. Файл не будет загружен в модель."
             }
-            if (destination.exists()) {
-                check(destination.delete()) { "Не удалось заменить старый файл $name." }
+            try {
+                Files.move(
+                    partial.toPath(),
+                    destination.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
-            check(partial.renameTo(destination)) { "Не удалось сохранить проверенный файл $name." }
             onProgress(Progress(name, expectedSize, expectedSize,
                 completedBefore + expectedSize, totalBytes))
         } catch (error: Exception) {
