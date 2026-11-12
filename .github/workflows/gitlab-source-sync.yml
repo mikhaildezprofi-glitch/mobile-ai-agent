@@ -102,15 +102,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          LAST_RELEASE_TAG="$(gh release list --limit 1 --json tagName --jq '.[0].tagName // empty')"
-          BASE_SHA=""
-          LAST_BUILT_PREFIX="$(printf '%s' "$LAST_RELEASE_TAG" | sed -n 's/^build-\([0-9a-f]\{12\}\)-.*/\1/p')"
-          if [[ -n "$LAST_BUILT_PREFIX" ]]; then
-            git fetch origin "refs/tags/$LAST_RELEASE_TAG:refs/tags/$LAST_RELEASE_TAG" || true
-            BASE_SHA="$(git rev-parse "${LAST_BUILT_PREFIX}^{commit}" 2>/dev/null || true)"
-          fi
+          BASE_SHA="$(gh run list --workflow android-build.yml --branch sync/current --status success --limit 1 --json headSha --jq '.[0].headSha // empty')"
           if [[ -z "$BASE_SHA" ]]; then
-            BASE_SHA="$GH_MAIN_SHA"
+            BASE_SHA="$(git rev-list --max-parents=0 "$SOURCE_SHA" | tail -n 1)"
+            echo "No successful Android build found; comparing from repository root."
           fi
 
           echo "Comparison base: $BASE_SHA"
