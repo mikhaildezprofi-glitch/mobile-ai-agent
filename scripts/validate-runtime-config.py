@@ -54,6 +54,28 @@ def main():
         require(prompt_path.is_file(), f"Missing prompt file: {profile['file']}")
         require(0 < prompt_path.stat().st_size <= 20000, f"Invalid prompt size: {profile['file']}")
 
+    response_profiles = load_json("response_profiles.json")
+    require(response_profiles.get("schemaVersion") == 1, "Invalid response profiles schema")
+    require(response_profiles.get("default") in [p.get("id") for p in response_profiles.get("profiles", [])],
+            "Default response profile is missing")
+
+    privacy = load_json("privacy.json")
+    require(privacy.get("schemaVersion") == 1, "Invalid privacy schema")
+    require(privacy.get("cloudUploadsRequireExplicitUserAction") is True, "Cloud uploads must be opt-in")
+    require(privacy.get("apiKeysInRemoteConfig") is False, "API keys must not be in remote config")
+
+    voice = load_json("voice.json")
+    require(voice.get("schemaVersion") == 1, "Invalid voice schema")
+    require(voice.get("wakeWord", {}).get("enabled") is False, "Wake word must remain disabled until native service is implemented")
+
+    network = load_json("network.json")
+    require(network.get("schemaVersion") == 1, "Invalid network schema")
+    require(1 <= int(network.get("timeouts", {}).get("connectSeconds", 0)) <= 60, "Invalid connect timeout")
+
+    diagnostics = load_json("diagnostics.json")
+    require(diagnostics.get("schemaVersion") == 1, "Invalid diagnostics schema")
+    require(diagnostics.get("includeApiKeys") is False, "Diagnostics must not include API keys")
+
     commands = load_json("commands.json")
     require(commands.get("schemaVersion") == 1, "Invalid commands schema")
     allowed_actions = {"ui.new_chat", "ui.open_settings", "ui.open_diagnostics", "generation.cancel"}
@@ -67,6 +89,7 @@ def main():
     print(f"Profiles: {len(prompts_index.get('profiles', []))}")
     print(f"Models: {len(models.get('models', []))}")
     print(f"Commands: {len(commands.get('commands', []))}")
+    print(f"Response profiles: {len(response_profiles.get('profiles', []))}")
 
 if __name__ == "__main__":
     main()
