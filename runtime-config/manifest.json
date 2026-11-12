@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "configVersion": "2026.11.13.1",
+  "configVersion": "2026.11.13.2",
   "channel": "stable",
   "minimumAppVersion": "0.4.1",
-  "generatedAt": "2026-11-13T00:00:00Z",
+  "generatedAt": "2026-11-13T03:30:00+05:00",
   "source": {
     "provider": "github_raw_mirror",
     "baseUrl": "https://raw.githubusercontent.com/mikhaildezprofi-glitch/mobile-ai-agent/sync/current/runtime-config/"
@@ -30,5 +30,25 @@
     "containsSecrets": false,
     "remoteCodeAllowed": false,
     "remoteExecutableContentAllowed": false
+  },
+  "sha256": {
+    "ui.json": "e4de52b52bbd8729ae9259b3f5e6a3acb095a63bb1b978878ccf73c7550aea73",
+    "modules.json": "25d0bbfd8060d8f330c11b4c06417c90d3551eff0498a260fc670e7734672303",
+    "models.json": "e8d16ee57b9ba25ecaacacf729dde5ce25cd2a2e474a02614a4cea68818074b4",
+    "routing.json": "22d1ea92cfd43ae1f7e71bded6c1220925ecaea028b7c67f70411828c92e9b3d",
+    "commands.json": "5a519fa71146f8d5d6ef633fdbda918bdbf0e4ea06b4fde7dbbe1d2520e512f7",
+    "response_profiles.json": "b1c442e18f6c5ea320fc84d59b14a2a7a58639bab9b898d8f9f61d8a2c6442aa",
+    "privacy.json": "4afe9ab4fa4061d95861a87a35df2036cee52c3695efb82f34ba6bfe8c97aece",
+    "voice.json": "9453bd1288d9d98719e3c3c25e6f597c81ed3c21c2495089e5d21f4a85671b61",
+    "network.json": "0edef2701798ddccf970ec98edf3bbba5b90f5b724851dc62d06bf5c4d3e2bff",
+    "diagnostics.json": "ab50eb5bd7e8bb34adb214d1e79a0a2bca4326fa00f5fcd5161f31a8bc57d9da",
+    "prompts/index.json": "ad235593f9606edbff515c9e65c0fe8ebd11b3953a81bd5bb3819332166e916c",
+    "prompts/assistant_ru.txt": "5cd98473e642358fa5cd4fe7f31fb34dca181511898d00699e37a881ae508e97",
+    "prompts/coding_ru.txt": "ae61d63b82d5cd6e9e8148ed0565a68198678684dbce366e65a742e247aaf111",
+    "prompts/vision_ru.txt": "3d0a4a4227a16b4b34a495097b3fbe8b109b3daea53677d8fd73c1acf61d9b9d",
+    "prompts/voice_ru.txt": "9cf69f3ba01f75f09f24bf7faf8c3c809e749c927516653aeac3235b5b4314d0",
+    "prompts/research_ru.txt": "9b8e5216118233ea829754df898be1d1767c331b32fac4418fc899cdd6c27edc",
+    "prompts/planning_ru.txt": "a765e1d9445d6216a7ab73c1d45153c7134696ddbca5635f8343e993617ccc6c",
+    "prompts/concise_ru.txt": "9e6027bc0c3e5e02f4c3aee97bd6af8a4074ea185fa2bc3b9e8c50ac2f8bee2a"
   }
 }
