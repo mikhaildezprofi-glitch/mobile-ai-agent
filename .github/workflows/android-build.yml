@@ -68,6 +68,22 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
+      - name: Verify APK signature and extract signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          "$APKSIGNER" verify --verbose "$APK"
+          CERT_OUTPUT="$("$APKSIGNER" verify --print-certs "$APK")"
+          printf '%s\n' "$CERT_OUTPUT"
+          SIGNER_SHA256="$(printf '%s\n' "$CERT_OUTPUT" | sed -n 's/.*Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          if [ -z "$SIGNER_SHA256" ]; then
+            echo "Could not extract APK signer certificate SHA-256 fingerprint." >&2
+            exit 1
+          fi
+          echo "APK_SIGNER_SHA256=$SIGNER_SHA256" >> "$GITHUB_ENV"
+
       - name: Create verified build metadata
         shell: bash
         run: |
@@ -92,6 +108,8 @@ jobs:
               "version_code": int(code.group(1)) if code else None,
               "version_name": version_name,
               "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
+              "apk_signature_verified": True,
+              "apk_signer_certificate_sha256": os.environ["APK_SIGNER_SHA256"],
               "apk_size": apk.stat().st_size
           }
           pathlib.Path("build-metadata.json").write_text(json.dumps(data, indent=2) + chr(10))

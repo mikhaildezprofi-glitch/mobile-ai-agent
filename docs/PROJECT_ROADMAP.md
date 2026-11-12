@@ -1,10 +1,10 @@
 # MOBILE AI AGENT — дорожная карта
 
-Актуальность: 2026-11-12. Канонический репозиторий: GitLab. GitHub используется как зеркало и облачный build runner.
+Актуальность: 2026-11-13. Канонический репозиторий: GitLab. GitHub используется как зеркало и облачный build runner.
 
 ## Текущая база
 
-- GitLab main: `d07d79fa6273cd47ae2fa3b7f68a9bb26c42be19`.
+- GitLab main: `ed5484034e21b6b19a7909f9f1f447adf1ebc701`.
 - Текущая версия исходников: `0.4.1`, debug APK должен иметь имя версии `0.4.1-debug` и versionCode `23`.
 - Устройство для целевой проверки: Samsung SM-S711B, Exynos 2200, Android 16, API 36, 8 GB RAM.
 - Предыдущая подтверждённая облачная сборка: `0.3.9-debug`, versionCode 21, GitLab SHA `98647def7182b6a08104b4def3460cd106876831`, GitHub Actions run #39. Для неё APK SHA-256: `6dd8be12cd8f88c3ab1bef2e3da822e3ec54ca85bcfd69f69c0c9518ad2f604e`.
@@ -28,6 +28,15 @@
 - Поиск в интернете и выполнение Android-команд пока не подключены как реальные инструменты; координатор сообщает об ограничении вместо имитации выполнения.
 - Голосовой wake-word «Джимми», непрерывный диалог после активации, автоматический возврат в ожидание и отдельная speaker verification ещё не реализованы.
 - TTS-ответы и полноценная фоновая голосовая сессия требуют отдельной реализации и runtime-проверки.
+
+## Последняя проверенная сборка
+
+- GitLab main SHA: `ed5484034e21b6b19a7909f9f1f447adf1ebc701`.
+- GitHub Actions run #45: успешно завершён; все шаги, включая `:app:testDebugUnitTest`, `:app:assembleDebug`, metadata, checksum и Release, завершились успешно.
+- APK versionName `0.4.1-debug`, versionCode `23`, размер `135546821` bytes.
+- APK SHA-256: `cdbb6d86334357584ca235cfb8b4b554ea6fca3fd8cc65a9030bc2a47662af6e`.
+- [Release build-ed5484034e21-43306201652](https://github.com/mikhaildezprofi-glitch/mobile-ai-agent/releases/tag/build-ed5484034e21-43306201652).
+- Не устанавливать эту сборку поверх установленной до сравнения сертификата подписи. Debug keystore GitHub runner может отличаться между запусками. Новый CI шаг проверяет подпись APK и записывает SHA-256 сертификата в metadata, но не делает ключ постоянным.
 
 ## Следующие этапы по приоритету
 
