@@ -146,11 +146,25 @@ jobs:
           fi
 
           RUNS="$(gh run list --workflow android-build.yml --branch sync/current --limit 20 --json status,headSha,conclusion)"
-          ACTIVE="$(printf '%s' "$RUNS" | jq -r --arg sha "$SOURCE_SHA" '.[] | select(.headSha == $sha and (.status == "queued" or .status == "in_progress")) | .headSha' | head -n 1)"
-          if [[ -n "$ACTIVE" ]]; then
-            echo "dispatch=false" >> "$GITHUB_OUTPUT"
-            echo "A build for source ${SOURCE_SHA} is already active."
-            exit 0
+          ACTIVE_SHA="$(printf '%s' "$RUNS" | jq -r '.[] | select(.status == "queued" or .status == "in_progress") | .headSha' | head -n 1)"
+          if [[ -n "$ACTIVE_SHA" ]]; then
+            if git cat-file -e "${ACTIVE_SHA}^{commit}" 2>/dev/null && git merge-base --is-ancestor "$ACTIVE_SHA" "$SOURCE_SHA"; then
+              ACTIVE_CHANGED="$(git diff --name-only "$ACTIVE_SHA" "$SOURCE_SHA")"
+              ACTIVE_NEEDS_BUILD=false
+              while IFS= read -r path; do
+                [[ -z "$path" ]] && continue
+                case "$path" in
+                  app/*|llama/*|gradle/*|third_party/*|build.gradle.kts|settings.gradle.kts|gradle.properties|gradlew|gradlew.bat|scripts/patch-llama-diagnostics.py)
+                    ACTIVE_NEEDS_BUILD=true
+                    ;;
+                esac
+              done <<< "$ACTIVE_CHANGED"
+              if [[ "$ACTIVE_NEEDS_BUILD" == "false" ]]; then
+                echo "dispatch=false" >> "$GITHUB_OUTPUT"
+                echo "An active build for ${ACTIVE_SHA} already includes all Android-affecting changes; later commits only changed non-APK files."
+                exit 0
+              fi
+            fi
           fi
 
           COMPLETED="$(printf '%s' "$RUNS" | jq -r --arg sha "$SOURCE_SHA" '.[] | select(.headSha == $sha and .status == "completed") | .conclusion' | head -n 1)"
