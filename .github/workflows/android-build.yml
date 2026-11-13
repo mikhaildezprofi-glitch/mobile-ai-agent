@@ -50,6 +50,9 @@ jobs:
       - name: Patch llama.cpp native diagnostics
         run: python3 scripts/patch-llama-diagnostics.py
 
+      - name: Run coordinator unit tests
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 

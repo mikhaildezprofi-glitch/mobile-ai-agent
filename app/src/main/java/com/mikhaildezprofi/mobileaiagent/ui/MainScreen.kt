@@ -727,8 +727,22 @@ fun MainScreen() {
             hybridMode = mode == AgentMode.HYBRID && attached.isEmpty()
         )
         status = route.warning ?: route.reason
+        if (route.provider == AgentProviderKind.BLOCKED) {
+            val message = route.warning ?: route.reason
+            val index = messages.lastIndex
+            if (index >= 0 && messages[index].speaker == "MOBILE AI") {
+                messages[index] = messages[index].copy(text = message)
+            }
+            attached.forEach { attachment ->
+                attachment.bitmap?.let { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
+            }
+            busy = false
+            status = message
+            return
+        }
         if (route.provider == AgentProviderKind.LOCAL && !modelReady) {
-            val message = "Для этой задачи нужна загруженная локальная модель. В гибридном режиме Gemini обрабатывает обычный текст, код и сложный анализ; файлы и изображения требуют локального движка."
+            val message = route.warning
+                ?: "Для этой задачи нужна загруженная локальная модель. В гибридном режиме Gemini обрабатывает обычный текст, код и сложный анализ; файлы и изображения требуют локального движка."
             val index = messages.lastIndex
             if (index >= 0 && messages[index].speaker == "MOBILE AI") {
                 messages[index] = messages[index].copy(text = message)
