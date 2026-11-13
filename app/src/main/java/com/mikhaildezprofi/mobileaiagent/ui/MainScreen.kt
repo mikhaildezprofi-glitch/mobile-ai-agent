@@ -335,13 +335,18 @@ fun MainScreen() {
     var currentChatId by ChatSessionState.currentChatId
     val chatListState = rememberLazyListState()
 
+    // Apply runtime history limits immediately, including after a remote config refresh.
+    LaunchedEffect(runtimeConfig.maxHistoryMessages) {
+        while (messages.size > runtimeConfig.maxHistoryMessages) messages.removeAt(0)
+    }
+
     // Restore the most recently saved chat after Android has recreated the process.
     // Activity recreation in the same process keeps ChatSessionState and skips this path.
     LaunchedEffect(appContext) {
         if (messages.isEmpty()) {
             val latestSavedChat = chatHistory.firstOrNull()
             if (latestSavedChat != null) {
-                messages.addAll(latestSavedChat.messages)
+                messages.addAll(latestSavedChat.messages.takeLast(runtimeConfig.maxHistoryMessages))
                 currentChatId = latestSavedChat.id
             }
         }
@@ -404,14 +409,16 @@ fun MainScreen() {
     }
 
     // Keep the newest text visible without forcing a scroll/recomposition on every token.
-    LaunchedEffect(messages.size, busy) {
-        if (busy) {
-            while (busy) {
-                if (messages.isNotEmpty()) chatListState.scrollToItem(messages.size)
-                delay(250)
+    LaunchedEffect(messages.size, busy, runtimeConfig.autoScrollDuringGeneration) {
+        if (runtimeConfig.autoScrollDuringGeneration) {
+            if (busy) {
+                while (busy) {
+                    if (messages.isNotEmpty()) chatListState.scrollToItem(messages.size)
+                    delay(250)
+                }
+            } else if (messages.isNotEmpty()) {
+                chatListState.scrollToItem(messages.size)
             }
-        } else if (messages.isNotEmpty()) {
-            chatListState.scrollToItem(messages.size)
         }
     }
     val attachments = remember { mutableStateListOf<ChatAttachment>() }
@@ -842,6 +849,7 @@ fun MainScreen() {
         attachments.clear()
         messages.add(ChatMessage("Вы", visibleText))
         messages.add(ChatMessage("MOBILE AI", ""))
+        while (messages.size > runtimeConfig.maxHistoryMessages) messages.removeAt(0)
         busy = true
         status = "Модель генерирует ответ…" +
             if (promptWasTruncated) " Текст ограничен лимитом runtime-конфигурации (${runtimeConfig.maxPromptCharacters} символов)." else ""
@@ -1134,7 +1142,7 @@ fun MainScreen() {
                         onClick = {
                             if (!busy) {
                                 messages.clear()
-                                messages.addAll(savedChat.messages)
+                                messages.addAll(savedChat.messages.takeLast(runtimeConfig.maxHistoryMessages))
                                 currentChatId = savedChat.id
                                 input = ""
                                 attachments.clear()
