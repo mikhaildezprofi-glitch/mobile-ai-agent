@@ -59,6 +59,7 @@ import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.VisionInferenceEngine
 import com.mikhaildezprofi.mobileaiagent.AgentCoordinator
+import com.mikhaildezprofi.mobileaiagent.AgentTaskKind
 import com.mikhaildezprofi.mobileaiagent.AppBackupManager
 import com.mikhaildezprofi.mobileaiagent.VisionModelAssets
 import com.mikhaildezprofi.mobileaiagent.AgentProviderKind
@@ -314,7 +315,6 @@ fun MainScreen() {
             }
         )
     }
-    var visionAssetsInstalled by remember { mutableStateOf(visionAssetsInitiallyInstalled) }
     val qwenModelFile = remember(appContext) {
         File(appContext.filesDir, "models/Qwen3-1.7B-Q4_K_M.gguf")
     }
@@ -470,6 +470,24 @@ fun MainScreen() {
         }
     }
     val attachments = remember { mutableStateListOf<ChatAttachment>() }
+    // One coordinator belongs to the chat session and is rebuilt only when provider
+    // settings or the loaded local engine change.
+    val coordinator = remember(
+        engine,
+        runtimeConfig.geminiApiEnabled,
+        runtimeConfig.geminiModelId,
+        runtimeConfig.networkConnectTimeoutSeconds,
+        runtimeConfig.networkReadTimeoutSeconds
+    ) {
+        AgentCoordinator.forContext(
+            appContext,
+            engine,
+            allowCloud = runtimeConfig.geminiApiEnabled,
+            cloudModelId = runtimeConfig.geminiModelId,
+            connectTimeoutSeconds = runtimeConfig.networkConnectTimeoutSeconds,
+            readTimeoutSeconds = runtimeConfig.networkReadTimeoutSeconds
+        )
+    }
 
     LaunchedEffect(appContext) {
         try {
@@ -703,47 +721,6 @@ fun MainScreen() {
         }
     }
 
-    fun downloadAndActivateVisionModel() {
-        if (busy || visionDownloadBusy) return
-        scope.launch {
-            visionDownloadBusy = true
-            var modelActivationStarted = false
-            visionDownloadProgress = 0f
-            visionDownloadStatus = "Проверка файлов SmolVLM…"
-            try {
-                val assets = VisionModelAssets.download(appContext) { progress ->
-                    withContext(Dispatchers.Main) {
-                        visionDownloadProgress = progress.fraction
-                        val currentMb = progress.fileBytes / (1024L * 1024L)
-                        val totalMb = progress.fileTotalBytes / (1024L * 1024L)
-                        val overallMb = progress.completedBytes / (1024L * 1024L)
-                        val overallTotalMb = progress.totalBytes / (1024L * 1024L)
-                        visionDownloadStatus =
-                            "${progress.fileName}: $currentMb / $totalMb МБ • всего $overallMb / $overallTotalMb МБ"
-                    }
-                }
-                visionAssetsInstalled = true
-                if (busy) {
-                    visionDownloadStatus =
-                        "Файлы скачаны и проверены. Дождитесь завершения текущего ответа, затем нажмите загрузку ещё раз."
-                    return@launch
-                }
-                visionDownloadStatus = "Оба файла проверены по SHA-256. Загружаю модель…"
-                busy = true
-                modelActivationStarted = true
-                activateModelFileNow(assets.model, assets.projector)
-                visionDownloadStatus = "SmolVLM установлена и загружена. Qwen сохранена отдельно."
-            } catch (error: Exception) {
-                visionAssetsInstalled = VisionModelAssets.areAssetsPresent(appContext)
-                visionDownloadStatus = "Ошибка: ${error.message ?: error.javaClass.simpleName}"
-                status = visionDownloadStatus
-            } finally {
-                if (modelActivationStarted) busy = false
-                visionDownloadBusy = false
-            }
-        }
-    }
-
     fun retainReadPermission(uri: Uri) {
         runCatching {
             appContext.contentResolver.takePersistableUriPermission(
@@ -866,8 +843,10 @@ fun MainScreen() {
         val rawUserText = input.trim()
         val userText = rawUserText.take(runtimeConfig.maxPromptCharacters)
         val promptWasTruncated = rawUserText.length > userText.length
+        val cloudOnlyReady = mode == AgentMode.HYBRID &&
+            geminiKeyConfigured && runtimeConfig.geminiApiEnabled
         if ((userText.isEmpty() && attachments.isEmpty()) ||
-            engine == null || !modelReady || busy
+            (!(engine != null && modelReady) && !cloudOnlyReady) || busy
         ) return
 
         val attached = attachments.toList()
@@ -877,7 +856,7 @@ fun MainScreen() {
                 if (isNotEmpty()) appendLine()
                 appendLine("Пользователь добавил вложения:")
                 attached.forEach { appendLine("- ${it.type}: ${it.name}") }
-                append("Текстовые файлы, DOCX, XLSX, PPTX и PDF будут прочитаны локально, если формат поддерживается. Для сканированных PDF пока нужен OCR. Фото передаются отдельному локальному vision-движку только при наличии совместимой загруженной модели; видео пока не анализируется.")
+                append("Текстовые файлы, DOCX, XLSX, PPTX и PDF читаются локально, если формат поддерживается. Фото и видео автоматически направляются локальному Vision-анализатору; координатор затем выбирает языковую модель для итогового ответа.")
             }
             // Qwen3 supports /no_think to skip the hidden reasoning channel
             // and produce a user-facing answer within the generation token budget.
@@ -903,14 +882,6 @@ fun MainScreen() {
             if (promptWasTruncated) " Текст ограничен лимитом runtime-конфигурации (${runtimeConfig.maxPromptCharacters} символов)." else ""
 
         val activeEngine = engine
-        val coordinator = AgentCoordinator.forContext(
-            appContext,
-            activeEngine,
-            allowCloud = runtimeConfig.geminiApiEnabled,
-            cloudModelId = runtimeConfig.geminiModelId,
-            connectTimeoutSeconds = runtimeConfig.networkConnectTimeoutSeconds,
-            readTimeoutSeconds = runtimeConfig.networkReadTimeoutSeconds
-        )
         val route = coordinator.route(
             prompt,
             hybridMode = mode == AgentMode.HYBRID && attached.isEmpty(),
@@ -982,48 +953,172 @@ fun MainScreen() {
                         else -> null
                     }
                 }
-                val videoAttachments = if (runtimeConfig.videoFrameExtractionEnabled) {
-                    attached.filter { it.type == "Видео" && it.uri != null }
-                } else emptyList()
-                val hasVisualAttachments = imageSources.isNotEmpty() || videoAttachments.isNotEmpty()
-                val visionEngine = activeEngine as? VisionInferenceEngine
-                val visionReady = runtimeConfig.visionInferenceEnabled &&
-                    hasVisualAttachments && visionEngine?.isVisionReady() == true
+                val hasVideoAttachment = attached.any { it.type == "Видео" }
+                val hasVisualAttachments = imageSources.isNotEmpty() || hasVideoAttachment
+                if (hasVisualAttachments) {
+                    check(runtimeConfig.visionInferenceEnabled) {
+                        "Vision-модуль отключён в настройках. Включите его, чтобы анализировать фото и видео."
+                    }
+                    if (hasVideoAttachment) {
+                        check(runtimeConfig.videoFrameExtractionEnabled) {
+                            "Извлечение кадров видео отключено в настройках."
+                        }
+                    }
+                    val visionEngine = activeEngine as? VisionInferenceEngine
+                        ?: error("Текущая нативная сборка не поддерживает Vision-модель.")
+                    val modelPreferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+                    val currentlySelected = modelPreferences.getString("model_path", null)?.let { File(it) }
+                    val textModelFile = currentlySelected?.takeIf {
+                        it.isFile && it.canRead() && !it.name.contains("SmolVLM", ignoreCase = true)
+                    } ?: qwenModelFile.takeIf { it.isFile && it.canRead() }
+                    check(textModelFile != null) {
+                        "Не найдена локальная языковая модель для возврата после Vision-анализа. Сначала выберите Qwen."
+                    }
 
-                if (visionReady && visionEngine != null) {
-                    status = if (videoAttachments.isNotEmpty()) "Извлечение кадров видео и подготовка изображений…"
-                        else "Подготовка изображений для локального анализа…"
+                    val visionAlreadyReady = visionEngine.isVisionReady()
+                    var visionModelActivated = false
+                    var stagedImages: com.mikhaildezprofi.mobileaiagent.StagedImageFiles? = null
                     val extractedVideoFrames = mutableListOf<ImageAttachmentSource>()
+                    val visionSummary = StringBuilder()
                     try {
-                        var remainingFrames = (4 - imageSources.size).coerceAtLeast(0)
-                        for (video in videoAttachments) {
+                        if (!visionAlreadyReady) {
+                            visionDownloadBusy = true
+                            visionDownloadProgress = 0f
+                            visionDownloadStatus = "Автоматическая подготовка Vision-модели…"
+                            status = "Координатор подключает Vision-модель для фото/видео…"
+                            val assets = VisionModelAssets.download(appContext) { progress ->
+                                withContext(Dispatchers.Main) {
+                                    visionDownloadProgress = progress.fraction
+                                    val currentMb = progress.fileBytes / (1024L * 1024L)
+                                    val totalMb = progress.fileTotalBytes / (1024L * 1024L)
+                                    val overallMb = progress.completedBytes / (1024L * 1024L)
+                                    val overallTotalMb = progress.totalBytes / (1024L * 1024L)
+                                    visionDownloadStatus =
+                                        "${progress.fileName}: $currentMb / $totalMb МБ • всего $overallMb / $overallTotalMb МБ"
+                                }
+                            }
+                            visionDownloadStatus = "Файлы Vision проверены. Переключаю движок…"
+                            visionModelActivated = true
+                            activateModelFileNow(assets.model, assets.projector)
+                            visionDownloadStatus = "Vision-модель автоматически загружена."
+                        } else {
+                            val selectedIsVision = currentlySelected?.name?.contains("SmolVLM", ignoreCase = true) == true
+                            visionModelActivated = selectedIsVision
+                        }
+
+                        status = if (hasVideoAttachment) {
+                            "Извлечение ключевых кадров видео и анализ…"
+                        } else {
+                            "Локальный анализ фото…"
+                        }
+                        val selectedImageSources = imageSources.take(if (hasVideoAttachment) 3 else 4)
+                        var remainingFrames = (4 - selectedImageSources.size).coerceAtLeast(0)
+                        for (video in attached.filter { it.type == "Видео" && it.uri != null }) {
                             if (remainingFrames <= 0) break
-                            val uri = video.uri ?: continue
                             val frames = withContext(Dispatchers.IO) {
-                                VideoFrameExtractor.extractFrames(appContext, uri, video.name, remainingFrames)
+                                VideoFrameExtractor.extractFrames(
+                                    appContext, video.uri!!, video.name, remainingFrames
+                                )
                             }
                             extractedVideoFrames += frames
                             remainingFrames -= frames.size
                         }
-                        val visualSources = imageSources + extractedVideoFrames
-                        if (visualSources.isEmpty()) error("Не удалось подготовить изображения или кадры видео.")
-                        val videoNote = if (videoAttachments.isNotEmpty()) {
-                            "\n\nК видео извлечено ${extractedVideoFrames.size} ключевых кадров. Анализ основан на этих кадрах, а не на каждом мгновении ролика."
+                        val visualSources = selectedImageSources + extractedVideoFrames
+                        check(visualSources.isNotEmpty()) {
+                            "Не удалось получить изображения или кадры из выбранного видео."
+                        }
+                        val videoNote = if (hasVideoAttachment) {
+                            "\n\nВидео представлено ${extractedVideoFrames.size} ключевыми кадрами. Не делай выводов о промежутках между кадрами."
                         } else ""
-                        val stagedImages = ImageAttachmentStager.stage(appContext, visualSources)
-                        try {
-                            withContext(Dispatchers.IO) {
-                                visionEngine.sendUserPromptWithImages(
-                                    message = effectivePrompt + videoNote,
-                                    imagePaths = stagedImages.files.map { it.absolutePath },
-                                    predictLength = minOf(
-                                        1024, runtimeConfig.maxOutputTokens, runtimeConfig.routing.localMaxTokens
-                                    )
-                                ).collect { token ->
-                                    pendingTokens.append(token)
-                                    val now = SystemClock.elapsedRealtime()
-                                    if (now - lastUiFlush >= 100L) {
-                                        flushPendingTokens()
+                        val omittedImages = imageSources.size - selectedImageSources.size
+                        val imageLimitNote = if (omittedImages > 0) {
+                            "\n\nДля одного запроса выбраны первые ${selectedImageSources.size} фото; ещё $omittedImages фото пропущено из-за лимита обработки."
+                        } else ""
+                        stagedImages = ImageAttachmentStager.stage(appContext, visualSources)
+                        withContext(Dispatchers.IO) {
+                            visionEngine.sendUserPromptWithImages(
+                                message = effectivePrompt + imageLimitNote + videoNote,
+                                imagePaths = stagedImages!!.files.map { it.absolutePath },
+                                predictLength = minOf(
+                                    1024, runtimeConfig.maxOutputTokens, runtimeConfig.routing.localMaxTokens
+                                )
+                            ).collect { token -> visionSummary.append(token) }
+                        }
+                        check(visionSummary.isNotBlank()) {
+                            "Vision-модель не вернула описание содержимого."
+                        }
+                    } finally {
+                        stagedImages?.close()
+                        extractedVideoFrames.forEach { source ->
+                            source.bitmap?.let { bitmap ->
+                                if (!bitmap.isRecycled) bitmap.recycle()
+                            }
+                        }
+                        if (visionModelActivated) {
+                            status = "Vision-анализ завершён. Возвращаю локальную языковую модель…"
+                            try {
+                                activateModelFileNow(textModelFile!!, null)
+                            } catch (restoreError: Exception) {
+                                throw IllegalStateException(
+                                    "Vision-анализ выполнен, но не удалось вернуть языковую модель ${textModelFile!!.name}: ${restoreError.message}",
+                                    restoreError
+                                )
+                            }
+                        }
+                        visionDownloadBusy = false
+                    }
+
+                    // Original photo/video files stay on-device. Only the text summary
+                    // produced by the local Vision model can be routed to the cloud.
+                    val languagePrompt = buildString {
+                        appendLine("Запрос пользователя:")
+                        appendLine(userText.ifBlank { "Проанализируй приложенные визуальные материалы." })
+                        appendLine()
+                        appendLine("Результат локального анализа визуальных данных:")
+                        appendLine(visionSummary.toString().trim())
+                        appendLine()
+                        append("Подготовь точный ответ на запрос пользователя. Не утверждай, что видел детали, которых нет в описании.")
+                    }
+                    status = "Vision-анализ готов. Координатор выбирает языковую модель…"
+                    withContext(Dispatchers.IO) {
+                        coordinator.generate(
+                            prompt = languagePrompt,
+                            maxTokens = runtimeConfig.maxOutputTokens,
+                            hybridMode = mode == AgentMode.HYBRID && textFileUris.isEmpty(),
+                            routing = runtimeConfig.routing,
+                            systemPrompt = systemPrompt,
+                            temperature = runtimeConfig.temperature,
+                            taskOverride = AgentTaskKind.GENERAL
+                        ).collect { token ->
+                            pendingTokens.append(token)
+                            val now = SystemClock.elapsedRealtime()
+                            if (now - lastUiFlush >= 100L) {
+                                flushPendingTokens()
+                                lastUiFlush = now
+                            }
+                        }
+                    }
+                } else {
+                    withContext(Dispatchers.IO) {
+                        coordinator.generate(
+                            prompt = effectivePrompt,
+                            maxTokens = runtimeConfig.maxOutputTokens,
+                            // Documents and other attachments stay local unless a separate policy is added.
+                            hybridMode = mode == AgentMode.HYBRID && attached.isEmpty(),
+                            routing = runtimeConfig.routing,
+                            systemPrompt = systemPrompt,
+                            temperature = runtimeConfig.temperature
+                        ).collect { token ->
+                            pendingTokens.append(token)
+                            val now = SystemClock.elapsedRealtime()
+                            if (now - lastUiFlush >= 100L) {
+                                flushPendingTokens()
+                                lastUiFlush = now
+                            }
+                        }
+                    }
+                }
+                flushPendingTokens()
                                         lastUiFlush = now
                                     }
                                 }
@@ -1328,7 +1423,8 @@ fun MainScreen() {
                                 maxHeight = (maxHeight - 8.dp).coerceAtLeast(96.dp),
                                 attachmentsEnabled = runtimeConfig.attachmentsEnabled,
                                 voiceEnabled = runtimeConfig.voiceEnabled,
-                                canSend = modelReady && !busy && (input.isNotBlank() || attachments.isNotEmpty()),
+                                canSend = (modelReady || (mode == AgentMode.HYBRID && geminiKeyConfigured && runtimeConfig.geminiApiEnabled)) &&
+                                    !busy && (input.isNotBlank() || attachments.isNotEmpty()),
                                 onAdd = { showPlusMenu = true },
                                 addMenu = { AttachmentMenu(showPlusMenu, { showPlusMenu = false }, runtimeConfig.cameraEnabled, filePicker, imagePicker, videoPicker, cameraLauncher) },
                                 onExpand = { inputFullscreen = true },
@@ -1359,8 +1455,9 @@ fun MainScreen() {
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        if (modelReady) "Напишите сообщение или задайте вопрос голосом."
-                        else "Откройте меню и загрузите GGUF-модель, чтобы начать общение.",
+                        if (modelReady) "Координатор автоматически выбирает локальную, Vision или облачную модель."
+                        else if (mode == AgentMode.HYBRID && geminiKeyConfigured && runtimeConfig.geminiApiEnabled) "Облачный режим готов. Для локальной и Vision-обработки загрузите Qwen."
+                        else "Откройте меню и настройте модель или Gemini API.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -1501,25 +1598,8 @@ fun MainScreen() {
                         LinearProgressIndicator(progress = visionDownloadProgress, modifier = Modifier.fillMaxWidth())
                     }
                     Text(visionDownloadStatus, style = MaterialTheme.typography.bodySmall)
-                    Button(
-                        onClick = { downloadAndActivateVisionModel() },
-                        enabled = engine != null && !busy && !visionDownloadBusy,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            if (visionAssetsInstalled) "Проверить и загрузить SmolVLM"
-                            else "Скачать и загрузить SmolVLM"
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = { activateModelFile(qwenModelFile, null) },
-                        enabled = qwenModelFile.isFile && engine != null && !busy && !visionDownloadBusy,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Переключиться на Qwen 1.7B")
-                    }
                     Text(
-                        "Загрузка идёт напрямую с Hugging Face. Перед активацией оба GGUF проверяются по SHA-256. Передача фотографий в облако не включается.",
+                        "Ручное переключение не требуется. При первом фото или видео координатор сам скачает и проверит SmolVLM, временно загрузит её, выполнит анализ и вернёт языковую модель. Исходные медиа остаются на телефоне; в гибридном режиме в облако может уйти только текстовое резюме локального анализа.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2043,7 +2123,8 @@ fun MainScreen() {
                         ComposerButtons(
                             attachmentsEnabled = runtimeConfig.attachmentsEnabled,
                             voiceEnabled = runtimeConfig.voiceEnabled,
-                            canSend = modelReady && !busy && (input.isNotBlank() || attachments.isNotEmpty()),
+                            canSend = (modelReady || (mode == AgentMode.HYBRID && geminiKeyConfigured && runtimeConfig.geminiApiEnabled)) &&
+                                    !busy && (input.isNotBlank() || attachments.isNotEmpty()),
                             onAdd = { showPlusMenu = true },
                             addMenu = {
                                 AttachmentMenu(

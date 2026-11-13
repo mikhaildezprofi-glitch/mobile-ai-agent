@@ -6,7 +6,7 @@
   "cameraCapture": { "enabled": true, "status": "implemented_ui_path" },
   "videoFrameExtraction": { "enabled": true, "status": "implemented_local_path" },
   "documentReading": { "enabled": true, "status": "implemented_with_format_limits" },
-  "visionInference": { "enabled": true, "status": "requires_compatible_model" },
+  "visionInference": { "enabled": true, "status": "auto_download_on_first_visual_task" },
   "geminiApi": { "enabled": true, "status": "requires_user_api_key" },
   "webSearch": { "enabled": false, "status": "not_connected" },
   "androidActions": { "enabled": false, "status": "not_connected" },

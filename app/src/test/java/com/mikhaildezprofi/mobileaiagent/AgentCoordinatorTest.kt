@@ -122,6 +122,20 @@ class AgentCoordinatorTest {
     }
 
     @Test
+    fun visualSummaryCanBeRoutedToCloudAsGeneralLanguageTask() {
+        val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
+
+        val route = coordinator.route(
+            prompt = "Запрос пользователя: что на фото? Локальный анализ: на изображении собака.",
+            hybridMode = true,
+            taskOverride = AgentTaskKind.GENERAL
+        )
+
+        assertEquals(AgentTaskKind.GENERAL, route.task)
+        assertEquals(AgentProviderKind.CLOUD, route.provider)
+    }
+
+    @Test
     fun currentInformationNeverBypassesMissingSearchProvider() {
         val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
         val routing = AgentRoutingConfig(
