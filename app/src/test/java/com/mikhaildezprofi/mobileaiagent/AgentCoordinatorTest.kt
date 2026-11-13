@@ -136,6 +136,43 @@ class AgentCoordinatorTest {
     }
 
     @Test
+    fun plannerPromptDefinesSupportedRolesAndStepLimit() {
+        val prompt = AgentTaskPlanner.buildPrompt("Разработай приложение")
+
+        assertTrue(prompt.contains("12 шагов"))
+        assertTrue(prompt.contains("developer"))
+        assertTrue(prompt.contains("depends_on"))
+    }
+
+    @Test
+    fun executorRegistryFallsBackToGeneralForUnknownRole() {
+        val registry = AgentExecutorRegistry.default()
+
+        assertEquals(AgentRole.DEVELOPER, registry.resolve("developer").role)
+        assertEquals(AgentRole.GENERAL, registry.resolve("missing-role").role)
+    }
+
+    @Test
+    fun taskPlanRejectsForwardDependencies() {
+        val plan = AgentTaskPlan(
+            title = "Некорректный план",
+            originalPrompt = "Проверка",
+            steps = listOf(
+                AgentTaskStep(id = "first", title = "Первый", prompt = "Шаг", dependsOn = listOf("second")),
+                AgentTaskStep(id = "second", title = "Второй", prompt = "Шаг")
+            )
+        )
+
+        var rejected = false
+        try {
+            plan.validate()
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue(rejected)
+    }
+
+    @Test
     fun currentInformationNeverBypassesMissingSearchProvider() {
         val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
         val routing = AgentRoutingConfig(

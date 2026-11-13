@@ -7,6 +7,8 @@ import com.arm.aichat.InferenceEngine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 enum class AgentTaskKind {
     GENERAL, CODE, COMPLEX_REASONING, CURRENT_INFORMATION,
@@ -54,7 +56,10 @@ interface CloudModelProvider : AgentModelProvider
 class AgentCoordinator(
     private val local: AgentModelProvider,
     private val cloud: CloudModelProvider? = null,
-    private val allowCloud: Boolean = true
+    private val allowCloud: Boolean = true,
+    private val planExecutionMutex: Mutex = Mutex(),
+    private val executorRegistry: AgentExecutorRegistry = AgentExecutorRegistry.default(),
+    private val taskStore: AgentTaskPersistence? = null
 ) {
     fun capabilities(): List<AgentCapability> = AgentToolRegistry.forRuntime(
         localReady = local.isAvailable,
@@ -190,6 +195,150 @@ class AgentCoordinator(
         }
     }
 
+
+    fun generateWithPlanning(
+        prompt: String,
+        maxTokens: Int,
+        hybridMode: Boolean,
+        routing: AgentRoutingConfig = AgentRoutingConfig(),
+        systemPrompt: String = "",
+        temperature: Double = 0.6
+    ): Flow<String> = flow {
+        val task = classify(prompt)
+        val needsPlan = task == AgentTaskKind.CODE || task == AgentTaskKind.COMPLEX_REASONING ||
+            prompt.length > 1_200 || listOf("поэтапно", "несколько этапов", "сначала", "затем", "проект целиком")
+                .any { prompt.lowercase().contains(it) }
+        if (!needsPlan) {
+            emitAll(generate(prompt, maxTokens, hybridMode, routing, systemPrompt, temperature))
+            return@flow
+        }
+        val plannerProvider = if (hybridMode && cloud?.isAvailable == true) cloud else local
+        check(plannerProvider.isAvailable) {
+            "Для составления плана нужна доступная модель. Настройте Gemini или загрузите локальную модель."
+        }
+        val plannerText = StringBuilder()
+        try {
+            plannerProvider.generate(
+                AgentTaskPlanner.buildPrompt(prompt),
+                AgentTaskPlanner.MAX_PLANNER_TOKENS,
+                temperature.coerceIn(0.0, 2.0)
+            ).collect { plannerText.append(it) }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            Log.w(TAG, "Planning request failed; using single-step execution (${error.javaClass.simpleName}).")
+        }
+        val plan = if (plannerText.isNotBlank()) {
+            runCatching { AgentTaskPlanner.parse(plannerText.toString(), prompt) }
+                .onFailure { Log.w(TAG, "Planner response rejected; using single-step execution (${it.javaClass.simpleName}).") }
+                .getOrNull()
+        } else null
+        val validatedPlan = plan ?: AgentTaskPlan.single(prompt).also {
+            emit("Не удалось получить корректный план. Выполняю запрос одним шагом.\n\n")
+        }
+        executePlan(validatedPlan, maxTokens, hybridMode, routing, systemPrompt, temperature).collect { event ->
+            when (event) {
+                is AgentTaskEvent.PlanStarted -> if (event.plan.steps.size > 1) {
+                    emit("План: ${event.plan.title} (${event.plan.steps.size} шага).\n\n")
+                }
+                is AgentTaskEvent.StepStarted -> if (event.total > 1) {
+                    emit("\n[${event.index}/${event.total}] ${event.step.title} · ${event.step.agentRole}\n")
+                }
+                is AgentTaskEvent.StepOutput -> emit(event.text)
+                is AgentTaskEvent.StepCompleted, is AgentTaskEvent.PlanCompleted -> Unit
+            }
+        }
+    }
+
+    fun resumablePlans(): List<SavedAgentPlan> = taskStore?.listResumable().orEmpty()
+
+    fun resumePlan(
+        planId: String,
+        maxTokensPerStep: Int,
+        hybridMode: Boolean,
+        routing: AgentRoutingConfig = AgentRoutingConfig(),
+        systemPrompt: String = "",
+        temperature: Double = 0.6
+    ): Flow<AgentTaskEvent> = flow {
+        val store = taskStore ?: throw IllegalStateException("Хранилище задач не подключено.")
+        val saved = store.loadPlan(planId)
+            ?: throw IllegalArgumentException("Сохранённый план не найден: $planId")
+        saved.steps.filter { it.status != AgentStepStatus.COMPLETED }.forEach { step ->
+            store.setStepStatus(planId, step.step.id, AgentStepStatus.PENDING)
+        }
+        store.setPlanStatus(planId, AgentPlanStatus.RUNNING)
+        emitAll(executePlan(saved.plan, maxTokensPerStep, hybridMode, routing, systemPrompt, temperature))
+    }
+
+    fun executePlan(
+        plan: AgentTaskPlan,
+        maxTokensPerStep: Int,
+        hybridMode: Boolean,
+        routing: AgentRoutingConfig = AgentRoutingConfig(),
+        systemPrompt: String = "",
+        temperature: Double = 0.6
+    ): Flow<AgentTaskEvent> = flow {
+        plan.validate()
+        taskStore?.savePlan(plan)
+        taskStore?.setPlanStatus(plan.id, AgentPlanStatus.RUNNING)
+        var activeStepId: String? = null
+        try {
+            planExecutionMutex.withLock {
+                emit(AgentTaskEvent.PlanStarted(plan))
+                val saved = taskStore?.loadPlan(plan.id)
+                val results = linkedMapOf<String, String>()
+                saved?.steps?.filter { it.status == AgentStepStatus.COMPLETED }?.forEach {
+                    results[it.step.id] = it.result
+                }
+                plan.steps.forEachIndexed { index, step ->
+                    if (saved?.steps?.firstOrNull { it.step.id == step.id }?.status == AgentStepStatus.COMPLETED) {
+                        emit(AgentTaskEvent.StepCompleted(step, results.getValue(step.id)))
+                        return@forEachIndexed
+                    }
+                    activeStepId = step.id
+                    taskStore?.setStepStatus(plan.id, step.id, AgentStepStatus.RUNNING)
+                    emit(AgentTaskEvent.StepStarted(step, index + 1, plan.steps.size))
+                    val dependencyContext = step.dependsOn.joinToString("\n\n") { dependencyId ->
+                        val dependency = plan.steps.first { it.id == dependencyId }
+                        "Результат шага «${dependency.title}»:\n${results.getValue(dependencyId)}"
+                    }
+                    val stepPrompt = buildString {
+                        appendLine("Ты выполняешь шаг ${index + 1} из ${plan.steps.size} общего плана «${plan.title}».")
+                        appendLine("Исходная задача: ${plan.originalPrompt}")
+                        if (dependencyContext.isNotBlank()) {
+                            appendLine("Результаты необходимых предыдущих шагов:")
+                            appendLine(dependencyContext)
+                        }
+                        appendLine("Роль исполнителя: ${step.agentRole}")
+                        appendLine("Текущее задание: ${step.prompt}")
+                        append("Выполни только это задание. Не утверждай, что внешние действия выполнены, если они не запускались и не проверялись.")
+                    }
+                    val result = StringBuilder()
+                    executorRegistry.resolve(step.agentRole).execute(stepPrompt, maxTokensPerStep) { specializedPrompt, tokenLimit ->
+                        generate(specializedPrompt, tokenLimit, hybridMode, routing, systemPrompt, temperature)
+                    }.collect { chunk ->
+                        result.append(chunk)
+                        emit(AgentTaskEvent.StepOutput(step.id, chunk))
+                    }
+                    val completed = result.toString()
+                    results[step.id] = completed
+                    taskStore?.completeStep(plan.id, step.id, completed)
+                    activeStepId = null
+                    emit(AgentTaskEvent.StepCompleted(step, completed))
+                }
+                taskStore?.setPlanStatus(plan.id, AgentPlanStatus.COMPLETED)
+                emit(AgentTaskEvent.PlanCompleted(plan.id, results.toMap()))
+            }
+        } catch (cancelled: CancellationException) {
+            activeStepId?.let { taskStore?.setStepStatus(plan.id, it, AgentStepStatus.PENDING) }
+            taskStore?.setPlanStatus(plan.id, AgentPlanStatus.PAUSED)
+            throw cancelled
+        } catch (error: Exception) {
+            activeStepId?.let { taskStore?.setStepStatus(plan.id, it, AgentStepStatus.FAILED, error.message) }
+            taskStore?.setPlanStatus(plan.id, AgentPlanStatus.FAILED)
+            throw error
+        }
+    }
+
     companion object {
         private const val TAG = "AgentCoordinator"
 
@@ -213,7 +362,8 @@ class AgentCoordinator(
                     connectTimeoutMs = connectTimeoutSeconds.coerceIn(5, 120) * 1000,
                     readTimeoutMs = readTimeoutSeconds.coerceIn(5, 300) * 1000
                 ) else null,
-                allowCloud = allowCloud
+                allowCloud = allowCloud,
+                taskStore = AgentTaskStore.get(context.applicationContext)
             )
         }
     }

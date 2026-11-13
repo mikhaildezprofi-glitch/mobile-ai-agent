@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.geometry.Offset
@@ -59,6 +60,7 @@ import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.VisionInferenceEngine
 import com.mikhaildezprofi.mobileaiagent.AgentCoordinator
+import com.mikhaildezprofi.mobileaiagent.AgentTaskStore
 import com.mikhaildezprofi.mobileaiagent.AgentTaskKind
 import com.mikhaildezprofi.mobileaiagent.AppBackupManager
 import com.mikhaildezprofi.mobileaiagent.VisionModelAssets
@@ -88,6 +90,23 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
+
+private fun taskPlanStatusLabel(status: com.mikhaildezprofi.mobileaiagent.AgentPlanStatus): String =
+    when (status) {
+        com.mikhaildezprofi.mobileaiagent.AgentPlanStatus.QUEUED -> "В очереди"
+        com.mikhaildezprofi.mobileaiagent.AgentPlanStatus.RUNNING -> "Выполняется"
+        com.mikhaildezprofi.mobileaiagent.AgentPlanStatus.PAUSED -> "Приостановлена"
+        com.mikhaildezprofi.mobileaiagent.AgentPlanStatus.COMPLETED -> "Завершена"
+        com.mikhaildezprofi.mobileaiagent.AgentPlanStatus.FAILED -> "Ошибка"
+    }
+
+private fun taskStepStatusLabel(status: com.mikhaildezprofi.mobileaiagent.AgentStepStatus): String =
+    when (status) {
+        com.mikhaildezprofi.mobileaiagent.AgentStepStatus.PENDING -> "Ожидает"
+        com.mikhaildezprofi.mobileaiagent.AgentStepStatus.RUNNING -> "Выполняется"
+        com.mikhaildezprofi.mobileaiagent.AgentStepStatus.COMPLETED -> "Готово"
+        com.mikhaildezprofi.mobileaiagent.AgentStepStatus.FAILED -> "Ошибка"
+    }
 
 private enum class AgentMode { LOCAL, HYBRID }
 
@@ -301,6 +320,10 @@ fun MainScreen() {
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showDiagnosticsDialog by remember { mutableStateOf(false) }
     var showCapabilitiesDialog by remember { mutableStateOf(false) }
+    var showTaskHistoryDialog by remember { mutableStateOf(false) }
+    var selectedTaskPlan by remember { mutableStateOf<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan?>(null) }
+    var planPendingDeletion by remember { mutableStateOf<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan?>(null) }
+    var agentTaskHistory by remember { mutableStateOf<List<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan>>(emptyList()) }
     var visionDownloadBusy by remember { mutableStateOf(false) }
     var visionDownloadProgress by remember { mutableFloatStateOf(0f) }
     val visionAssetsInitiallyInstalled = remember(appContext) {
@@ -388,8 +411,6 @@ fun MainScreen() {
         while (messages.size > runtimeConfig.maxHistoryMessages) messages.removeAt(0)
     }
 
-    // Restore the most recently saved chat after Android has recreated the process.
-    // Activity recreation in the same process keeps ChatSessionState and skips this path.
     LaunchedEffect(appContext) {
         if (messages.isEmpty()) {
             val latestSavedChat = chatHistory.firstOrNull()
@@ -487,6 +508,16 @@ fun MainScreen() {
             connectTimeoutSeconds = runtimeConfig.networkConnectTimeoutSeconds,
             readTimeoutSeconds = runtimeConfig.networkReadTimeoutSeconds
         )
+    }
+
+    // Restore the most recently saved chat after Android has recreated the process.
+    // Activity recreation in the same process keeps ChatSessionState and skips this path.
+    LaunchedEffect(coordinator, busy) {
+        if (!busy) {
+            agentTaskHistory = withContext(Dispatchers.IO) {
+                AgentTaskStore.get(appContext).listHistory()
+            }
+        }
     }
 
     LaunchedEffect(appContext) {
@@ -839,6 +870,83 @@ fun MainScreen() {
         else status = "Доступ к микрофону не предоставлен."
     }
 
+    fun refreshAgentTaskHistory() {
+        scope.launch {
+            agentTaskHistory = withContext(Dispatchers.IO) {
+                AgentTaskStore.get(appContext).listHistory()
+            }
+        }
+    }
+
+    fun resumeSavedAgentPlan(saved: com.mikhaildezprofi.mobileaiagent.SavedAgentPlan) {
+        if (busy) return
+        messages.add(ChatMessage("Вы", "Продолжить задачу: ${saved.plan.title}"))
+        messages.add(ChatMessage("MOBILE AI", ""))
+        busy = true
+        status = "Возобновляю сохранённую задачу…"
+        val resumeJob = BackgroundGenerationController.scope.launch {
+            var notificationTitle = "Ответ готов"
+            var notificationMessage = "MOBILE AI завершил продолжение задачи."
+            try {
+                ContextCompat.startForegroundService(
+                    appContext,
+                    Intent(appContext, GenerationForegroundService::class.java)
+                        .setAction(GenerationForegroundService.ACTION_START)
+                        .putExtra(
+                            GenerationForegroundService.EXTRA_LOCAL_INFERENCE,
+                            mode == AgentMode.LOCAL || !geminiKeyConfigured
+                        )
+                )
+                withContext(Dispatchers.IO) {
+                    coordinator.resumePlan(
+                        planId = saved.plan.id,
+                        maxTokensPerStep = runtimeConfig.maxOutputTokens,
+                        hybridMode = mode == AgentMode.HYBRID && geminiKeyConfigured,
+                        routing = runtimeConfig.routing,
+                        systemPrompt = systemPrompt,
+                        temperature = runtimeConfig.temperature
+                    ).collect { event ->
+                        if (event is com.mikhaildezprofi.mobileaiagent.AgentTaskEvent.StepOutput) {
+                            withContext(Dispatchers.Main) {
+                                val index = messages.lastIndex
+                                if (index >= 0) {
+                                    messages[index] = messages[index].copy(text = messages[index].text + event.text)
+                                }
+                            }
+                        }
+                    }
+                }
+                status = "Задача завершена."
+            } catch (error: CancellationException) {
+                notificationTitle = "Задача приостановлена"
+                notificationMessage = "Сохранённые результаты шагов доступны в истории задач."
+                throw error
+            } catch (error: Exception) {
+                val message = "Ошибка продолжения: ${error.message ?: error.javaClass.simpleName}"
+                withContext(Dispatchers.Main) {
+                    val index = messages.lastIndex
+                    if (index >= 0) messages[index] = messages[index].copy(text = message)
+                }
+                status = message
+                notificationTitle = "Ошибка задачи"
+                notificationMessage = error.message ?: error.javaClass.simpleName
+            } finally {
+                withContext(Dispatchers.Main) {
+                    busy = false
+                    refreshAgentTaskHistory()
+                }
+                appContext.startService(
+                    Intent(appContext, GenerationForegroundService::class.java)
+                        .setAction(GenerationForegroundService.ACTION_COMPLETE)
+                        .putExtra(GenerationForegroundService.EXTRA_TITLE, notificationTitle)
+                        .putExtra(GenerationForegroundService.EXTRA_MESSAGE, notificationMessage)
+                )
+                BackgroundGenerationController.currentJob = null
+            }
+        }
+        BackgroundGenerationController.currentJob = resumeJob
+    }
+
     fun sendMessage() {
         val rawUserText = input.trim()
         val userText = rawUserText.take(runtimeConfig.maxPromptCharacters)
@@ -1100,7 +1208,7 @@ fun MainScreen() {
                     }
                 } else {
                     withContext(Dispatchers.IO) {
-                        coordinator.generate(
+                        coordinator.generateWithPlanning(
                             prompt = effectivePrompt,
                             maxTokens = runtimeConfig.maxOutputTokens,
                             // Documents and other attachments stay local unless a separate policy is added.
@@ -1190,6 +1298,16 @@ fun MainScreen() {
                             input = ""
                             currentChatId = System.currentTimeMillis().toString()
                         }
+                        scope.launch { drawerState.close() }
+                    }
+                )
+                NavigationDrawerItem(
+                    label = { Text("История задач") },
+                    selected = false,
+                    icon = { Icon(Icons.Default.History, contentDescription = null) },
+                    onClick = {
+                        refreshAgentTaskHistory()
+                        showTaskHistoryDialog = true
                         scope.launch { drawerState.close() }
                     }
                 )
@@ -1534,6 +1652,111 @@ fun MainScreen() {
             },
             confirmButton = {
                 TextButton(onClick = { showCapabilitiesDialog = false }) { Text("Закрыть") }
+            }
+        )
+    }
+
+    if (showTaskHistoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showTaskHistoryDialog = false },
+            title = { Text("История задач") },
+            text = {
+                Column(
+                    modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (agentTaskHistory.isEmpty()) {
+                        Text("Сохранённых задач пока нет.")
+                    } else {
+                        agentTaskHistory.forEach { saved ->
+                            val done = saved.steps.count { it.status == com.mikhaildezprofi.mobileaiagent.AgentStepStatus.COMPLETED }
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                onClick = {
+                                    selectedTaskPlan = saved
+                                    showTaskHistoryDialog = false
+                                }
+                            ) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(saved.plan.title, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        "${taskPlanStatusLabel(saved.status)} · $done/${saved.steps.size} шагов",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTaskHistoryDialog = false }) { Text("Закрыть") }
+            }
+        )
+    }
+
+    selectedTaskPlan?.let { saved ->
+        val done = saved.steps.count { it.status == com.mikhaildezprofi.mobileaiagent.AgentStepStatus.COMPLETED }
+        AlertDialog(
+            onDismissRequest = { selectedTaskPlan = null },
+            title = { Text(saved.plan.title) },
+            text = {
+                Column(
+                    modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("${taskPlanStatusLabel(saved.status)} · $done/${saved.steps.size} шагов")
+                    Text("Исходная задача", fontWeight = FontWeight.SemiBold)
+                    SelectionContainer { Text(saved.plan.originalPrompt, style = MaterialTheme.typography.bodySmall) }
+                    HorizontalDivider()
+                    saved.steps.forEachIndexed { index, step ->
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("${index + 1}. ${step.step.title} · ${taskStepStatusLabel(step.status)}", fontWeight = FontWeight.SemiBold)
+                            Text("Исполнитель: ${step.step.agentRole}", style = MaterialTheme.typography.labelSmall)
+                            if (step.result.isNotBlank()) {
+                                Text("Результат", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                SelectionContainer { Text(step.result, style = MaterialTheme.typography.bodySmall) }
+                            }
+                            step.error?.takeIf { it.isNotBlank() }?.let {
+                                Text("Ошибка: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                        if (index != saved.steps.lastIndex) HorizontalDivider()
+                    }
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { planPendingDeletion = saved; selectedTaskPlan = null }) { Text("Удалить") }
+                    if (saved.canResume) {
+                        TextButton(onClick = { selectedTaskPlan = null; resumeSavedAgentPlan(saved) }, enabled = !busy) { Text("Продолжить") }
+                    }
+                    TextButton(onClick = { selectedTaskPlan = null }) { Text("Закрыть") }
+                }
+            }
+        )
+    }
+
+    planPendingDeletion?.let { saved ->
+        AlertDialog(
+            onDismissRequest = { planPendingDeletion = null },
+            title = { Text("Удалить задачу?") },
+            text = { Text("Будут удалены план «${saved.plan.title}» и все сохранённые результаты его шагов. Это действие нельзя отменить.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val id = saved.plan.id
+                    planPendingDeletion = null
+                    scope.launch {
+                        withContext(Dispatchers.IO) { AgentTaskStore.get(appContext).deletePlan(id) }
+                        refreshAgentTaskHistory()
+                    }
+                }) { Text("Удалить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { planPendingDeletion = null }) { Text("Отмена") }
             }
         )
     }

@@ -2,7 +2,7 @@ name: Android APK Build
 
 on:
   push:
-    branches: [ 'sync/**' ]
+    branches: [ 'sync/**', 'fix/**' ]
     paths:
       - 'app/**'
       - 'llama/**'
