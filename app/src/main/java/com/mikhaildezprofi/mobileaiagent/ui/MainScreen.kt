@@ -1103,6 +1103,8 @@ fun MainScreen() {
                     onClick = {
                         promptDraft = systemPrompt
                         configDraft = runtimeConfig
+                        selectedPromptProfileId = runtimeConfig.selectedPromptProfileId
+                        selectedResponseProfileId = runtimeConfig.selectedResponseProfileId
                         showSettingsDialog = true
                         scope.launch { drawerState.close() }
                     }
@@ -1648,7 +1650,7 @@ fun MainScreen() {
                         }
                     }
                     Text(
-                        "Лимит ответа: ${configDraft.maxOutputTokens} токенов • temperature: ${configDraft.temperature}",
+                        "Лимит ответа: ${configDraft.maxOutputTokens} токенов • temperature: ${configDraft.temperature}. Температура применяется к Gemini; локальный Qwen использует параметры native engine.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
