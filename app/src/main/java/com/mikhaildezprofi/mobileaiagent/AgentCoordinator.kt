@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Central request coordinator.
@@ -63,7 +65,8 @@ interface CloudModelProvider : AgentModelProvider
 class AgentCoordinator(
     private val local: AgentModelProvider,
     private val cloud: CloudModelProvider? = null,
-    private val visionReady: Boolean = false
+    private val visionReady: Boolean = false,
+    private val planExecutionMutex: Mutex = Mutex()
 ) {
     fun capabilities(): List<AgentCapability> = AgentToolRegistry.forRuntime(
         localReady = local.isAvailable,
@@ -164,6 +167,45 @@ class AgentCoordinator(
             },
             warning = warning
         )
+    }
+
+    /** Executes a validated plan sequentially; each step receives only completed dependency results. */
+    fun executePlan(
+        plan: AgentTaskPlan,
+        maxTokensPerStep: Int,
+        hybridMode: Boolean
+    ): Flow<AgentTaskEvent> = flow {
+        plan.validate()
+        planExecutionMutex.withLock {
+            emit(AgentTaskEvent.PlanStarted(plan))
+            val results = linkedMapOf<String, String>()
+            plan.steps.forEachIndexed { index, step ->
+                emit(AgentTaskEvent.StepStarted(step, index + 1, plan.steps.size))
+                val dependencyContext = step.dependsOn.joinToString("\n\n") { dependencyId ->
+                    val dependency = plan.steps.first { it.id == dependencyId }
+                    "Результат шага «${dependency.title}»:\n${results.getValue(dependencyId)}"
+                }
+                val stepPrompt = buildString {
+                    appendLine("Ты выполняешь шаг ${index + 1} из ${plan.steps.size} общего плана «${plan.title}».")
+                    appendLine("Исходная задача: ${plan.originalPrompt}")
+                    if (dependencyContext.isNotBlank()) {
+                        appendLine("Результаты необходимых предыдущих шагов:")
+                        appendLine(dependencyContext)
+                    }
+                    appendLine("Текущее задание: ${step.prompt}")
+                    append("Выполни только это задание. Не утверждай, что внешние действия выполнены, если они не запускались и не проверялись.")
+                }
+                val result = StringBuilder()
+                generate(stepPrompt, maxTokensPerStep, hybridMode).collect { chunk ->
+                    result.append(chunk)
+                    emit(AgentTaskEvent.StepOutput(step.id, chunk))
+                }
+                val completed = result.toString()
+                results[step.id] = completed
+                emit(AgentTaskEvent.StepCompleted(step, completed))
+            }
+            emit(AgentTaskEvent.PlanCompleted(plan.id, results.toMap()))
+        }
     }
 
     fun generate(prompt: String, maxTokens: Int, hybridMode: Boolean): Flow<String> = flow {

@@ -81,6 +81,48 @@ class AgentCoordinatorTest {
     }
 
     @Test
+    fun planRunsStepsInOrderAndPassesDependencyResults() = runBlocking {
+        val prompts = mutableListOf<String>()
+        val provider = object : AgentModelProvider {
+            override val id = "local"
+            override val isAvailable = true
+            override fun generate(prompt: String, maxTokens: Int): Flow<String> = flow {
+                prompts += prompt
+                emit("result-${prompts.size}")
+            }
+        }
+        val first = AgentTaskStep(id = "research", title = "Собрать данные", prompt = "Собери исходные данные")
+        val second = AgentTaskStep(
+            id = "summary", title = "Сделать вывод", prompt = "Сформулируй вывод",
+            dependsOn = listOf("research")
+        )
+        val plan = AgentTaskPlan(title = "Анализ", originalPrompt = "Проанализируй тему", steps = listOf(first, second))
+
+        val events = AgentCoordinator(provider).executePlan(plan, 128, false).toList()
+
+        assertEquals(2, prompts.size)
+        assertTrue(prompts[1].contains("Результат шага «Собрать данные»"))
+        assertTrue(prompts[1].contains("result-1"))
+        assertEquals(2, events.filterIsInstance<AgentTaskEvent.StepCompleted>().size)
+        assertTrue(events.last() is AgentTaskEvent.PlanCompleted)
+    }
+
+    @Test
+    fun planRejectsForwardDependencies() {
+        val stepA = AgentTaskStep(id = "a", title = "A", prompt = "A", dependsOn = listOf("b"))
+        val stepB = AgentTaskStep(id = "b", title = "B", prompt = "B")
+        val plan = AgentTaskPlan(title = "Invalid", originalPrompt = "Task", steps = listOf(stepA, stepB))
+
+        var rejected = false
+        try {
+            plan.validate()
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue(rejected)
+    }
+
+    @Test
     fun visionCapabilityReflectsRuntimeState() {
         val ready = AgentCoordinator(FakeProvider("local", true), visionReady = true)
         val notReady = AgentCoordinator(FakeProvider("local", true), visionReady = false)
