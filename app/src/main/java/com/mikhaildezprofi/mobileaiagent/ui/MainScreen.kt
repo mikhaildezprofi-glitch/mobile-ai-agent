@@ -953,9 +953,6 @@ fun MainScreen() {
                         else -> null
                     }
                 }
-                val videoAttachments = if (runtimeConfig.videoFrameExtractionEnabled) {
-                    attached.filter { it.type == "Видео" && it.uri != null }
-                } else emptyList()
                 val hasVideoAttachment = attached.any { it.type == "Видео" }
                 val hasVisualAttachments = imageSources.isNotEmpty() || hasVideoAttachment
                 if (hasVisualAttachments) {
@@ -1014,7 +1011,8 @@ fun MainScreen() {
                         } else {
                             "Локальный анализ фото…"
                         }
-                        var remainingFrames = (4 - imageSources.size).coerceAtLeast(0)
+                        val selectedImageSources = imageSources.take(if (hasVideoAttachment) 3 else 4)
+                        var remainingFrames = (4 - selectedImageSources.size).coerceAtLeast(0)
                         for (video in attached.filter { it.type == "Видео" && it.uri != null }) {
                             if (remainingFrames <= 0) break
                             val frames = withContext(Dispatchers.IO) {
@@ -1025,17 +1023,21 @@ fun MainScreen() {
                             extractedVideoFrames += frames
                             remainingFrames -= frames.size
                         }
-                        val visualSources = imageSources + extractedVideoFrames
+                        val visualSources = selectedImageSources + extractedVideoFrames
                         check(visualSources.isNotEmpty()) {
                             "Не удалось получить изображения или кадры из выбранного видео."
                         }
                         val videoNote = if (hasVideoAttachment) {
                             "\n\nВидео представлено ${extractedVideoFrames.size} ключевыми кадрами. Не делай выводов о промежутках между кадрами."
                         } else ""
+                        val omittedImages = imageSources.size - selectedImageSources.size
+                        val imageLimitNote = if (omittedImages > 0) {
+                            "\n\nДля одного запроса выбраны первые ${selectedImageSources.size} фото; ещё $omittedImages фото пропущено из-за лимита обработки."
+                        } else ""
                         stagedImages = ImageAttachmentStager.stage(appContext, visualSources)
                         withContext(Dispatchers.IO) {
                             visionEngine.sendUserPromptWithImages(
-                                message = effectivePrompt + videoNote,
+                                message = effectivePrompt + imageLimitNote + videoNote,
                                 imagePaths = stagedImages!!.files.map { it.absolutePath },
                                 predictLength = minOf(
                                     1024, runtimeConfig.maxOutputTokens, runtimeConfig.routing.localMaxTokens
