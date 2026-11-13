@@ -152,6 +152,32 @@ class AgentTaskStore(context: Context) : SQLiteOpenHelper(
         readableDatabase.rawQuery("SELECT * FROM plans WHERE id = ?", arrayOf(planId))
     )
 
+    /** Returns recent plans, including completed ones, for the task history screen. */
+    fun listHistory(limit: Int = 30): List<SavedAgentPlan> {
+        val cursor = readableDatabase.rawQuery(
+            "SELECT id FROM plans ORDER BY updated_at DESC LIMIT ?",
+            arrayOf(limit.coerceIn(1, 100).toString())
+        )
+        val ids = cursor.use { c ->
+            buildList { while (c.moveToNext()) add(c.getString(0)) }
+        }
+        return ids.mapNotNull(::readPlanById)
+    }
+
+    /** Deletes a plan and its steps in one transaction; no FK pragma assumptions. */
+    fun deletePlan(planId: String): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("steps", "plan_id = ?", arrayOf(planId))
+            val deleted = db.delete("plans", "id = ?", arrayOf(planId)) > 0
+            db.setTransactionSuccessful()
+            return deleted
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     override fun listResumable(limit: Int): List<SavedAgentPlan> {
         val cursor = readableDatabase.rawQuery(
             "SELECT id FROM plans WHERE status IN (?, ?, ?, ?) ORDER BY updated_at DESC LIMIT ?",
