@@ -14,7 +14,9 @@ import java.net.URL
 /** Gemini REST provider. API key is loaded from encrypted storage and never logged. */
 class GeminiCloudProvider(
     private val keyStore: GeminiApiKeyStore,
-    private val model: String = DEFAULT_MODEL
+    private val model: String = DEFAULT_MODEL,
+    private val connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
+    private val readTimeoutMs: Int = READ_TIMEOUT_MS
 ) : CloudModelProvider {
     override val id: String = "Google Gemini API"
     override val isAvailable: Boolean get() = keyStore.hasKey()
@@ -54,8 +56,8 @@ class GeminiCloudProvider(
         try {
             connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
+                connectTimeout = connectTimeoutMs
+                readTimeout = readTimeoutMs
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("Accept", "application/json")
