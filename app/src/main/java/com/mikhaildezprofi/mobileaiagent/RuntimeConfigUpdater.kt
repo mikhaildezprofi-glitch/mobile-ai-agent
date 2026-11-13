@@ -45,6 +45,13 @@ object RuntimeConfigUpdater {
         require(manifest.optJSONObject("source")?.optString("baseUrl") == BASE_URL) {
             "Источник конфигурации не совпадает с доверенным адресом."
         }
+        val minimumVersion = manifest.optString("minimumAppVersion")
+        if (minimumVersion.isNotBlank()) {
+            val installedVersion = app.packageManager.getPackageInfo(app.packageName, 0).versionName.orEmpty()
+            require(compareVersions(installedVersion, minimumVersion) >= 0) {
+                "Для этой runtime-конфигурации требуется приложение версии $minimumVersion или новее. Установлена $installedVersion."
+            }
+        }
 
         val files = manifest.optJSONObject("files") ?: error("В manifest отсутствует список файлов.")
         val hashes = manifest.optJSONObject("sha256") ?: error("В manifest отсутствуют SHA-256.")
@@ -148,6 +155,19 @@ object RuntimeConfigUpdater {
             staging.deleteRecursively()
             throw error
         }
+    }
+
+    private fun compareVersions(installed: String, required: String): Int {
+        fun parts(value: String): List<Int> = value.split(".").map { segment ->
+            segment.takeWhile { it.isDigit() }.toIntOrNull() ?: 0
+        }
+        val left = parts(installed)
+        val right = parts(required)
+        for (index in 0 until maxOf(left.size, right.size)) {
+            val comparison = (left.getOrElse(index) { 0 }).compareTo(right.getOrElse(index) { 0 })
+            if (comparison != 0) return comparison
+        }
+        return 0
     }
 
     private fun isSafeRelativePath(path: String): Boolean {
