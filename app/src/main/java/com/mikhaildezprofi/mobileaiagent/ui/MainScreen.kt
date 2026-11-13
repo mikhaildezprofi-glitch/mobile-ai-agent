@@ -777,7 +777,7 @@ fun MainScreen() {
                             RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                             RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                         )
-                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, runtimeConfig.voiceLanguage)
                         putExtra(RecognizerIntent.EXTRA_PROMPT, "Говорите…")
                         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                     }
@@ -844,7 +844,12 @@ fun MainScreen() {
 
         val activeEngine = engine
         val coordinator = AgentCoordinator.forContext(
-            appContext, activeEngine, allowCloud = runtimeConfig.geminiApiEnabled
+            appContext,
+            activeEngine,
+            allowCloud = runtimeConfig.geminiApiEnabled,
+            cloudModelId = runtimeConfig.geminiModelId,
+            connectTimeoutSeconds = runtimeConfig.networkConnectTimeoutSeconds,
+            readTimeoutSeconds = runtimeConfig.networkReadTimeoutSeconds
         )
         val route = coordinator.route(
             prompt,
@@ -1224,7 +1229,7 @@ fun MainScreen() {
                             ComposerInput(
                                 value = input,
                                 onValueChange = { input = it },
-                                placeholder = if (messages.isEmpty()) "Спросить AI" else "Ответить AI",
+                                placeholder = if (messages.isEmpty()) runtimeConfig.placeholderNewChat else runtimeConfig.placeholderReply,
                                 maxHeight = (maxHeight - 8.dp).coerceAtLeast(96.dp),
                                 attachmentsEnabled = runtimeConfig.attachmentsEnabled,
                                 voiceEnabled = runtimeConfig.voiceEnabled,
@@ -1881,7 +1886,7 @@ fun MainScreen() {
                             Box {
                                 if (input.isEmpty()) {
                                     Text(
-                                        if (messages.isEmpty()) "Спросить AI" else "Ответить AI",
+                                        if (messages.isEmpty()) runtimeConfig.placeholderNewChat else runtimeConfig.placeholderReply,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
