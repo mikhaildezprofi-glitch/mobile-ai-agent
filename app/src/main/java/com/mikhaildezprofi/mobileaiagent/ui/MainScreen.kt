@@ -1173,7 +1173,7 @@ fun MainScreen() {
                         if (!busy) {
                             if (messages.isNotEmpty()) {
                                 val title = messages.firstOrNull { it.speaker == "Вы" }?.text
-                                    ?.replace("\\n", " ")?.take(42)?.ifBlank { "Новый чат" } ?: "Новый чат"
+                                    ?.replace("\n", " ")?.take(42)?.ifBlank { "Новый чат" } ?: "Новый чат"
                                 val active = SavedChat(currentChatId, title, messages.toList(), System.currentTimeMillis())
                                 val snapshot = (listOf(active) + chatHistory.filterNot { it.id == currentChatId }).take(50)
                                 chatHistory.clear()

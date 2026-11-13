@@ -147,21 +147,25 @@ object AppBackupManager {
         validatedFiles.forEach { (name, content) ->
             val target = java.io.File(runtimeDirectory, name)
             val temporary = java.io.File(runtimeDirectory, "$name.restore.tmp")
+            val previous = java.io.File(runtimeDirectory, "$name.restore.previous")
             temporary.writeText(content)
-            if (target.exists() && !target.delete()) {
+            if (previous.exists()) previous.delete()
+            if (target.exists() && !target.renameTo(previous)) {
                 temporary.delete()
-                error("Не удалось обновить файл настроек: $name")
+                error("Не удалось подготовить замену файла настроек: $name")
             }
             if (!temporary.renameTo(target)) {
                 temporary.delete()
+                if (previous.exists()) previous.renameTo(target)
                 error("Не удалось сохранить файл настроек: $name")
             }
+            previous.delete()
         }
 
         context.getSharedPreferences("agent_chats", Context.MODE_PRIVATE)
             .edit().putString("history", chats).commit()
         val editor = context.getSharedPreferences("runtime_config_selection", Context.MODE_PRIVATE).edit()
-        runtimePreferenceKeys.forEach(editor::remove)
+        runtimePreferenceKeys.forEach { key -> editor.remove(key) }
         val restoredKeys = validatedPreferences.keys()
         while (restoredKeys.hasNext()) {
             val key = restoredKeys.next()
