@@ -290,12 +290,22 @@ object RuntimeFiles {
         return AgentRuntimeFiles(config, effectivePrompt, dir, customPrompt)
     }
 
+    fun clearModuleOverrides(context: Context) {
+        val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        listOf(
+            "attachments", "voiceInput", "cameraCapture", "diagnostics",
+            "videoFrameExtraction", "documentReading", "visionInference", "geminiApi"
+        ).forEach { editor.remove("module.$it") }
+        editor.apply()
+    }
+
     fun save(
         context: Context,
         config: AgentRuntimeConfig,
         prompt: String,
         selectedPromptProfileId: String = config.selectedPromptProfileId,
-        selectedResponseProfileId: String = config.selectedResponseProfileId
+        selectedResponseProfileId: String = config.selectedResponseProfileId,
+        moduleOverrides: Set<String> = emptySet()
     ) {
         val dir = runtimeDir(context)
         val promptProfile = config.promptProfiles.firstOrNull { it.id == selectedPromptProfileId }
@@ -304,19 +314,24 @@ object RuntimeFiles {
             else prompt != DEFAULT_PROMPT
         )
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        prefs.edit()
+        val editor = prefs.edit()
             .putString("selectedPromptProfile", selectedPromptProfileId)
             .putString("selectedResponseProfile", selectedResponseProfileId)
             .putBoolean("customPrompt", isCustomPrompt)
-            .putBoolean("module.attachments", config.attachmentsEnabled)
-            .putBoolean("module.voiceInput", config.voiceEnabled)
-            .putBoolean("module.cameraCapture", config.cameraEnabled)
-            .putBoolean("module.diagnostics", config.diagnosticsEnabled)
-            .putBoolean("module.videoFrameExtraction", config.videoFrameExtractionEnabled)
-            .putBoolean("module.documentReading", config.documentReadingEnabled)
-            .putBoolean("module.visionInference", config.visionInferenceEnabled)
-            .putBoolean("module.geminiApi", config.geminiApiEnabled)
-            .apply()
+        val moduleValues = mapOf(
+            "attachments" to config.attachmentsEnabled,
+            "voiceInput" to config.voiceEnabled,
+            "cameraCapture" to config.cameraEnabled,
+            "diagnostics" to config.diagnosticsEnabled,
+            "videoFrameExtraction" to config.videoFrameExtractionEnabled,
+            "documentReading" to config.documentReadingEnabled,
+            "visionInference" to config.visionInferenceEnabled,
+            "geminiApi" to config.geminiApiEnabled
+        )
+        moduleOverrides.forEach { key ->
+            moduleValues[key]?.let { value -> editor.putBoolean("module.$key", value) }
+        }
+        editor.apply()
 
         File(dir, "ui_config.json").writeText(
             JSONObject().put("inputMaxLines", config.inputMaxLines.coerceIn(1, 3)).toString(2)
