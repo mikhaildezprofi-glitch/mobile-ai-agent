@@ -282,7 +282,10 @@ object RuntimeFiles {
             voiceLanguage = voiceLanguage,
             geminiModelId = geminiModelId,
             networkConnectTimeoutSeconds = networkTimeouts?.optInt("connectSeconds", 15)?.coerceIn(5, 120) ?: 15,
-            networkReadTimeoutSeconds = networkTimeouts?.optInt("readSeconds", 60)?.coerceIn(5, 300) ?: 60
+            networkReadTimeoutSeconds = minOf(
+                networkTimeouts?.optInt("readSeconds", 60)?.coerceIn(5, 300) ?: 60,
+                routing.requestTimeoutSeconds
+            )
         )
         return AgentRuntimeFiles(config, effectivePrompt, dir, customPrompt)
     }
