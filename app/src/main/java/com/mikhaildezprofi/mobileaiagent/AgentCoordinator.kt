@@ -196,12 +196,20 @@ class AgentCoordinator(
         fun forContext(
             context: Context,
             engine: InferenceEngine?,
-            allowCloud: Boolean = true
+            allowCloud: Boolean = true,
+            cloudModelId: String = "gemini-3.5-flash-lite",
+            connectTimeoutSeconds: Int = 15,
+            readTimeoutSeconds: Int = 60
         ): AgentCoordinator {
             val keyStore = GeminiApiKeyStore(context.applicationContext)
             return AgentCoordinator(
                 local = engine?.let(::LocalLlamaProvider) ?: UnavailableLocalProvider,
-                cloud = if (allowCloud) GeminiCloudProvider(keyStore) else null,
+                cloud = if (allowCloud) GeminiCloudProvider(
+                    keyStore,
+                    model = cloudModelId,
+                    connectTimeoutMs = connectTimeoutSeconds.coerceIn(5, 120) * 1000,
+                    readTimeoutMs = readTimeoutSeconds.coerceIn(5, 300) * 1000
+                ) else null,
                 allowCloud = allowCloud
             )
         }
