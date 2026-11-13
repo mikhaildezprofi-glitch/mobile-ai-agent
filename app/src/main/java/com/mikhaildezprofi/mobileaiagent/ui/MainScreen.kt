@@ -238,6 +238,7 @@ private const val MAX_CHAT_ATTACHMENTS = 10
 private fun addAttachmentsSafely(
     target: MutableList<ChatAttachment>,
     incoming: List<ChatAttachment>,
+    maxCount: Int = MAX_CHAT_ATTACHMENTS,
     onLimitReached: () -> Unit
 ) {
     var limitReached = false
@@ -246,7 +247,7 @@ private fun addAttachmentsSafely(
             attachment.uri != null && existing.uri == attachment.uri && existing.type == attachment.type
         }
         if (duplicate) return@forEach
-        if (target.size >= MAX_CHAT_ATTACHMENTS) {
+        if (target.size >= maxCount.coerceIn(1, MAX_CHAT_ATTACHMENTS)) {
             limitReached = true
         } else {
             target.add(attachment)
@@ -722,8 +723,8 @@ fun MainScreen() {
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach(::retainReadPermission)
-        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Файл", it) }) {
-            status = "Можно добавить не более $MAX_CHAT_ATTACHMENTS вложений в одно сообщение."
+        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Файл", it) }, runtimeConfig.maxAttachmentCount) {
+            status = "Можно добавить не более ${runtimeConfig.maxAttachmentCount} вложений в одно сообщение."
         }
     }
 
@@ -731,8 +732,8 @@ fun MainScreen() {
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach(::retainReadPermission)
-        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Фото", it) }) {
-            status = "Можно добавить не более $MAX_CHAT_ATTACHMENTS вложений в одно сообщение."
+        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Фото", it) }, runtimeConfig.maxAttachmentCount) {
+            status = "Можно добавить не более ${runtimeConfig.maxAttachmentCount} вложений в одно сообщение."
         }
     }
 
@@ -740,8 +741,8 @@ fun MainScreen() {
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach(::retainReadPermission)
-        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Видео", it) }) {
-            status = "Можно добавить не более $MAX_CHAT_ATTACHMENTS вложений в одно сообщение."
+        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Видео", it) }, runtimeConfig.maxAttachmentCount) {
+            status = "Можно добавить не более ${runtimeConfig.maxAttachmentCount} вложений в одно сообщение."
         }
     }
 
@@ -749,8 +750,8 @@ fun MainScreen() {
         ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
         if (bitmap != null) {
-            addAttachmentsSafely(attachments, listOf(ChatAttachment("Фото с камеры", "Фото", bitmap = bitmap))) {
-                status = "Можно добавить не более $MAX_CHAT_ATTACHMENTS вложений в одно сообщение."
+            addAttachmentsSafely(attachments, listOf(ChatAttachment("Фото с камеры", "Фото", bitmap = bitmap)), runtimeConfig.maxAttachmentCount) {
+                status = "Можно добавить не более ${runtimeConfig.maxAttachmentCount} вложений в одно сообщение."
             }
         }
     }
