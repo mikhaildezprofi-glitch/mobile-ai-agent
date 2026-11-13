@@ -126,7 +126,7 @@ class AgentCoordinatorTest {
         val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
 
         val route = coordinator.route(
-            prompt = "Запрос пользователя: что на фото?\\nЛокальный анализ: на изображении собака.",
+            prompt = "Запрос пользователя: что на фото? Локальный анализ: на изображении собака.",
             hybridMode = true,
             taskOverride = AgentTaskKind.GENERAL
         )
