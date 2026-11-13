@@ -296,7 +296,9 @@ object RuntimeFiles {
     ) {
         val dir = runtimeDir(context)
         val promptProfile = config.promptProfiles.firstOrNull { it.id == selectedPromptProfileId }
-        val isCustomPrompt = prompt.isNotBlank() && prompt != promptProfile?.content
+        val isCustomPrompt = prompt.isNotBlank() &&
+            if (promptProfile != null) prompt != promptProfile.content
+            else prompt != DEFAULT_PROMPT
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit()
             .putString("selectedPromptProfile", selectedPromptProfileId)
