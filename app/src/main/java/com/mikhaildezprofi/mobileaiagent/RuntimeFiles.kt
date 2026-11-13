@@ -60,7 +60,13 @@ data class AgentRuntimeConfig(
     val maxOutputTokens: Int = 512,
     val temperature: Double = 0.6,
     val maxPromptCharacters: Int = 24_000,
-    val maxAttachmentCount: Int = 10
+    val maxAttachmentCount: Int = 10,
+    val placeholderNewChat: String = "Спросить AI",
+    val placeholderReply: String = "Ответить AI",
+    val voiceLanguage: String = "ru-RU",
+    val geminiModelId: String = "gemini-3.5-flash-lite",
+    val networkConnectTimeoutSeconds: Int = 15,
+    val networkReadTimeoutSeconds: Int = 60
 )
 
 data class AgentRuntimeFiles(
@@ -141,6 +147,8 @@ object RuntimeFiles {
         val privacy = readJson(File(remote, "privacy.json"))
         val promptsJson = readJson(File(remote, "prompts/index.json"))
         val responsesJson = readJson(File(remote, "response_profiles.json"))
+        val modelsJson = readJson(File(remote, "models.json"))
+        val networkJson = readJson(File(remote, "network.json"))
         val voiceJson = readJson(File(remote, "voice.json"))
         val diagnosticsJson = readJson(File(remote, "diagnostics.json"))
 
@@ -208,6 +216,16 @@ object RuntimeFiles {
             ?: defaultResponseId.takeIf { id -> responseProfiles.any { it.id == id } }
             ?: responseProfiles.firstOrNull()?.id.orEmpty()
         val responseProfile = responseProfiles.firstOrNull { it.id == selectedResponseId }
+        val modelEntries = modelsJson.optJSONArray("models") ?: JSONArray()
+        val geminiModelId = (0 until modelEntries.length())
+            .mapNotNull { modelEntries.optJSONObject(it) }
+            .firstOrNull { it.optString("provider") == "google_gemini" && it.optBoolean("enabled", false) }
+            ?.optString("modelId")
+            ?.takeIf { it.matches(Regex("[A-Za-z0-9._-]{1,80}")) }
+            ?: "gemini-3.5-flash-lite"
+        val networkTimeouts = networkJson.optJSONObject("timeouts")
+        val voiceLanguage = voiceJson.optJSONObject("input")?.optString("language", "ru-RU")
+            ?.takeIf { it.matches(Regex("[a-z]{2}-[A-Z]{2}")) } ?: "ru-RU"
 
         val routing = AgentRoutingConfig(
             defaultMode = routingJson.optString("defaultMode", "hybrid")
@@ -256,7 +274,15 @@ object RuntimeFiles {
             maxPromptCharacters = ui.optJSONObject("limits")
                 ?.optInt("maxPromptCharacters", 24_000)?.coerceIn(1024, 100_000) ?: 24_000,
             maxAttachmentCount = ui.optJSONObject("limits")
-                ?.optInt("maxAttachmentCount", 10)?.coerceIn(1, 10) ?: 10
+                ?.optInt("maxAttachmentCount", 10)?.coerceIn(1, 10) ?: 10,
+            placeholderNewChat = ui.optJSONObject("composer")
+                ?.optString("placeholderNewChat", "Спросить AI") ?: "Спросить AI",
+            placeholderReply = ui.optJSONObject("composer")
+                ?.optString("placeholderReply", "Ответить AI") ?: "Ответить AI",
+            voiceLanguage = voiceLanguage,
+            geminiModelId = geminiModelId,
+            networkConnectTimeoutSeconds = networkTimeouts?.optInt("connectSeconds", 15)?.coerceIn(5, 120) ?: 15,
+            networkReadTimeoutSeconds = networkTimeouts?.optInt("readSeconds", 60)?.coerceIn(5, 300) ?: 60
         )
         return AgentRuntimeFiles(config, effectivePrompt, dir, customPrompt)
     }
