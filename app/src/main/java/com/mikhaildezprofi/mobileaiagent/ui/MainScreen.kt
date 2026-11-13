@@ -808,7 +808,9 @@ fun MainScreen() {
     }
 
     fun sendMessage() {
-        val userText = input.trim()
+        val rawUserText = input.trim()
+        val userText = rawUserText.take(runtimeConfig.maxPromptCharacters)
+        val promptWasTruncated = rawUserText.length > userText.length
         if ((userText.isEmpty() && attachments.isEmpty()) ||
             engine == null || !modelReady || busy
         ) return
@@ -841,7 +843,8 @@ fun MainScreen() {
         messages.add(ChatMessage("Вы", visibleText))
         messages.add(ChatMessage("MOBILE AI", ""))
         busy = true
-        status = "Модель генерирует ответ…"
+        status = "Модель генерирует ответ…" +
+            if (promptWasTruncated) " Текст ограничен лимитом runtime-конфигурации (${runtimeConfig.maxPromptCharacters} символов)." else ""
 
         val activeEngine = engine
         val coordinator = AgentCoordinator.forContext(
@@ -1347,9 +1350,9 @@ fun MainScreen() {
     if (showCapabilitiesDialog) {
         val capabilities = AgentToolRegistry.forRuntime(
             localReady = modelReady,
-            cloudReady = geminiKeyConfigured,
-            fileReaderReady = true,
-            visionReady = visionReady
+            cloudReady = geminiKeyConfigured && runtimeConfig.geminiApiEnabled,
+            fileReaderReady = runtimeConfig.documentReadingEnabled,
+            visionReady = visionReady && runtimeConfig.visionInferenceEnabled
         ).all()
         AlertDialog(
             onDismissRequest = { showCapabilitiesDialog = false },
@@ -1360,6 +1363,11 @@ fun MainScreen() {
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text("Список показывает только реально подключённые функции. Наличие API-ключа не означает, что облачный запрос уже проверен.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "Пока не подключены: веб-поиск, управление Android, пробуждение по слову «Джимми» и синтез речи. Удалённые флаги не включают отсутствующий код.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     capabilities.forEach { capability ->
                         Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(if (capability.available) "●" else "○", color = if (capability.available) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1522,7 +1530,12 @@ fun MainScreen() {
                             geminiTestStatus = "Проверка ключа и доступности модели…"
                             scope.launch {
                                 try {
-                                    geminiTestStatus = GeminiCloudProvider(geminiKeyStore).testConnection()
+                                    geminiTestStatus = GeminiCloudProvider(
+                                        geminiKeyStore,
+                                        model = runtimeConfig.geminiModelId,
+                                        connectTimeoutMs = runtimeConfig.networkConnectTimeoutSeconds * 1000,
+                                        readTimeoutMs = runtimeConfig.networkReadTimeoutSeconds * 1000
+                                    ).testConnection()
                                 } catch (error: Exception) {
                                     geminiTestStatus = "Проверка не пройдена: ${error.message ?: error.javaClass.simpleName}"
                                 } finally {
@@ -1536,7 +1549,7 @@ fun MainScreen() {
                     if (geminiTestStatus.isNotBlank()) {
                         Text(geminiTestStatus, style = MaterialTheme.typography.bodySmall)
                     }
-                    Text("Gemini 3.5 Flash-Lite • бесплатный уровень при наличии квоты Google")
+                    Text("${runtimeConfig.geminiModelId} • бесплатный уровень при наличии квоты Google")
                     HorizontalDivider()
                     Text("Установленное приложение Gemini", fontWeight = FontWeight.SemiBold)
                     Text(
@@ -1647,6 +1660,11 @@ fun MainScreen() {
                         maxLines = 5
                     )
                     Text("Встроенные модули")
+                    Text(
+                        "Недоступные в этой сборке функции нельзя активировать одной настройкой: веб-поиск, Android-действия, wake word и TTS остаются выключены.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
                             checked = configDraft.documentReadingEnabled,
