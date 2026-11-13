@@ -52,8 +52,8 @@ private class LocalLlamaProvider(
 }
 
 /**
- * Cloud providers implement the same contract. No cloud endpoint or API key is
- * bundled in this build; a provider is considered usable only after explicit setup.
+ * Cloud providers implement the same contract. Credentials are supplied by the
+ * user and stored separately from the application source code.
  */
 interface CloudModelProvider : AgentModelProvider
 
@@ -107,10 +107,6 @@ class AgentCoordinator(
         }
 
         val warning = when {
-            task == AgentTaskKind.FILE_ANALYSIS ->
-                "Выбранные TXT, исходники и поддерживаемые DOCX/XLSX/PPTX читаются локально. PDF и бинарные форматы пока не извлекаются."
-            task == AgentTaskKind.IMAGE_ANALYSIS ->
-                "Инструмент анализа изображений ещё не подключён. Изображение не передаётся модели."
             task == AgentTaskKind.DEVICE_ACTION ->
                 "Инструменты управления Android ещё не подключены. Действие не выполняется."
             task == AgentTaskKind.CURRENT_INFORMATION ->

@@ -678,18 +678,26 @@ fun MainScreen() {
 
     fun sendMessage() {
         val userText = input.trim()
-        if ((userText.isEmpty() && attachments.isEmpty()) ||
-            engine == null || !modelReady || busy
-        ) return
+        if ((userText.isEmpty() && attachments.isEmpty()) || busy) return
 
         val attached = attachments.toList()
+        val cloudOnlyTextAllowed = attached.isEmpty() &&
+            mode == AgentMode.HYBRID && geminiKeyConfigured
+        if (!modelReady && !cloudOnlyTextAllowed) {
+            status = if (attached.isNotEmpty()) {
+                "Для обработки вложений нужна загруженная локальная модель."
+            } else {
+                "Загрузите локальную модель или настройте Gemini и включите гибридный режим."
+            }
+            return
+        }
         val prompt = buildString {
             append(userText)
             if (attached.isNotEmpty()) {
                 if (isNotEmpty()) appendLine()
                 appendLine("Пользователь добавил вложения:")
                 attached.forEach { appendLine("- ${it.type}: ${it.name}") }
-                append("Текстовые файлы, DOCX, XLSX, PPTX и PDF будут прочитаны локально, если формат поддерживается. Для сканированных PDF пока нужен OCR. Фото передаются отдельному локальному vision-движку только при наличии совместимой загруженной модели; видео пока не анализируется.")
+                append("Поддерживаемые текстовые файлы, исходники, DOCX, XLSX, PPTX и PDF обрабатываются локально; сканированным PDF нужен OCR. Фото анализируются локальной vision-моделью, а из видео извлекается до четырёх кадров. Вложения не отправляются в облако.")
             }
             // Qwen3 supports /no_think to skip the hidden reasoning channel
             // and produce a user-facing answer within the generation token budget.
@@ -710,7 +718,7 @@ fun MainScreen() {
         messages.add(ChatMessage("Вы", visibleText))
         messages.add(ChatMessage("MOBILE AI", ""))
         busy = true
-        status = "Модель генерирует ответ…"
+        status = "Подготовка ответа…"
 
         val activeEngine = engine
         val coordinator = AgentCoordinator.forContext(appContext, activeEngine)
@@ -719,8 +727,8 @@ fun MainScreen() {
             hybridMode = mode == AgentMode.HYBRID && attached.isEmpty()
         )
         status = route.warning ?: route.reason
-        if (route.provider == AgentProviderKind.LOCAL && activeEngine == null) {
-            val message = "Локальный движок не инициализирован. Запросы без вложений доступны через Gemini в гибридном режиме при настроенном API-ключе; обработка вложений требует локального движка."
+        if (route.provider == AgentProviderKind.LOCAL && !modelReady) {
+            val message = "Для этой задачи нужна загруженная локальная модель. В гибридном режиме Gemini обрабатывает обычный текст, код и сложный анализ; файлы и изображения требуют локального движка."
             val index = messages.lastIndex
             if (index >= 0 && messages[index].speaker == "MOBILE AI") {
                 messages[index] = messages[index].copy(text = message)
@@ -1080,7 +1088,9 @@ fun MainScreen() {
                                 maxHeight = (maxHeight - 8.dp).coerceAtLeast(96.dp),
                                 attachmentsEnabled = runtimeConfig.attachmentsEnabled,
                                 voiceEnabled = runtimeConfig.voiceEnabled,
-                                canSend = modelReady && !busy && (input.isNotBlank() || attachments.isNotEmpty()),
+                                canSend = !busy && (input.isNotBlank() || attachments.isNotEmpty()) &&
+                                    (if (attachments.isNotEmpty()) modelReady
+                                    else modelReady || (mode == AgentMode.HYBRID && geminiKeyConfigured)),
                                 onAdd = { showPlusMenu = true },
                                 addMenu = { AttachmentMenu(showPlusMenu, { showPlusMenu = false }, runtimeConfig.cameraEnabled, filePicker, imagePicker, videoPicker, cameraLauncher) },
                                 onExpand = { inputFullscreen = true },
@@ -1112,7 +1122,8 @@ fun MainScreen() {
                     Spacer(Modifier.height(8.dp))
                     Text(
                         if (modelReady) "Напишите сообщение или задайте вопрос голосом."
-                        else "Откройте меню и загрузите GGUF-модель, чтобы начать общение.",
+                        else if (mode == AgentMode.HYBRID && geminiKeyConfigured) "Текстовые запросы доступны через Gemini. Для файлов и изображений нужна локальная модель."
+                        else "Откройте меню и загрузите GGUF-модель или настройте Gemini в гибридном режиме.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
