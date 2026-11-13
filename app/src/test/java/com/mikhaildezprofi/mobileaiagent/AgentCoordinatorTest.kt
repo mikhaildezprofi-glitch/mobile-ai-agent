@@ -204,6 +204,39 @@ class AgentCoordinatorTest {
         assertFalse(notReady.capabilities().first { it.id == AgentCapabilityId.IMAGE_UNDERSTANDING }.available)
     }
 
+    @Test
+    fun executorRegistrySelectsSpecializedRoleAndFallsBackForUnknownRole() {
+        val registry = AgentExecutorRegistry.default()
+        assertTrue(registry.supportedRoles().containsAll(
+            setOf("general", "research", "analyst", "developer", "tester", "reviewer", "writer")
+        ))
+        assertEquals(
+            AgentRole.DEVELOPER,
+            registry.resolve("developer").role
+        )
+        assertEquals(
+            AgentRole.GENERAL,
+            registry.resolve("unregistered_tool").role
+        )
+    }
+
+    @Test
+    fun developerExecutorAddsItsOwnInstructionsBeforeCallingProvider() = runBlocking {
+        var capturedPrompt = ""
+        val registry = AgentExecutorRegistry.default()
+        val executor = registry.resolve("developer")
+        executor.execute("Напиши функцию", 128) { prompt, _ ->
+            flow {
+                capturedPrompt = prompt
+                emit("код")
+            }
+        }.toList()
+
+        assertTrue(capturedPrompt.contains("Специализация исполнителя: developer"))
+        assertTrue(capturedPrompt.contains("Работай как разработчик"))
+        assertTrue(capturedPrompt.contains("Напиши функцию"))
+    }
+
     private open class FakeProvider(
         override val id: String,
         override val isAvailable: Boolean,

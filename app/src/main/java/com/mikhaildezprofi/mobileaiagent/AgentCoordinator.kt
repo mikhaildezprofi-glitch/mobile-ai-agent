@@ -66,7 +66,8 @@ class AgentCoordinator(
     private val local: AgentModelProvider,
     private val cloud: CloudModelProvider? = null,
     private val visionReady: Boolean = false,
-    private val planExecutionMutex: Mutex = Mutex()
+    private val planExecutionMutex: Mutex = Mutex(),
+    private val executorRegistry: AgentExecutorRegistry = AgentExecutorRegistry.default()
 ) {
     fun capabilities(): List<AgentCapability> = AgentToolRegistry.forRuntime(
         localReady = local.isAvailable,
@@ -252,7 +253,10 @@ class AgentCoordinator(
                     append("Выполни только это задание. Не утверждай, что внешние действия выполнены, если они не запускались и не проверялись.")
                 }
                 val result = StringBuilder()
-                generate(stepPrompt, maxTokensPerStep, hybridMode).collect { chunk ->
+                val executor = executorRegistry.resolve(step.agentRole)
+                executor.execute(stepPrompt, maxTokensPerStep) { specializedPrompt, tokenLimit ->
+                    generate(specializedPrompt, tokenLimit, hybridMode)
+                }.collect { chunk ->
                     result.append(chunk)
                     emit(AgentTaskEvent.StepOutput(step.id, chunk))
                 }
