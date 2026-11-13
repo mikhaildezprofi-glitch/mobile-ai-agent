@@ -84,4 +84,40 @@ class AgentCoordinatorTest {
         assertEquals(AgentTaskKind.COMPLEX_REASONING, route.task)
         assertEquals(AgentProviderKind.CLOUD, route.provider)
     }
+
+    @Test
+    fun runtimeRoutingCanMoveGeneralRequestsToLocalOnly() {
+        val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
+        val routing = AgentRoutingConfig(
+            cloudPreferredTasks = emptySet(),
+            localOnlyTasks = setOf("file_analysis", "image_analysis", "device_action")
+        )
+
+        val route = coordinator.route("Привет, помоги разобраться", hybridMode = true, routing = routing)
+
+        assertEquals(AgentProviderKind.LOCAL, route.provider)
+    }
+
+    @Test
+    fun runtimeLocalOnlyRuleOverridesCloudPreference() {
+        val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
+        val routing = AgentRoutingConfig(
+            cloudPreferredTasks = setOf("general", "code"),
+            localOnlyTasks = setOf("general")
+        )
+
+        val route = coordinator.route("Привет", hybridMode = true, routing = routing)
+
+        assertEquals(AgentProviderKind.LOCAL, route.provider)
+    }
+
+    @Test
+    fun runtimeRoutingStillHonorsHybridOff() {
+        val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
+        val routing = AgentRoutingConfig(cloudPreferredTasks = setOf("general"))
+
+        val route = coordinator.route("Привет", hybridMode = false, routing = routing)
+
+        assertEquals(AgentProviderKind.LOCAL, route.provider)
+    }
 }
