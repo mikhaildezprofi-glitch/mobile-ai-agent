@@ -2,30 +2,20 @@ package com.mikhaildezprofi.mobileaiagent
 
 import android.content.Context
 import android.util.Log
-import com.arm.aichat.InferenceEngine
-import com.arm.aichat.VisionInferenceEngine
 import kotlinx.coroutines.CancellationException
+import com.arm.aichat.InferenceEngine
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/**
- * Central request coordinator.
- *
- * This class is deliberately limited to routing and provider execution.
- * Android actions and web search must remain blocked until real executors exist.
- */
 enum class AgentTaskKind {
     GENERAL, CODE, COMPLEX_REASONING, CURRENT_INFORMATION,
     FILE_ANALYSIS, IMAGE_ANALYSIS, DEVICE_ACTION
 }
 
-enum class AgentProviderKind { LOCAL, CLOUD, BLOCKED }
+enum class AgentProviderKind { LOCAL, CLOUD }
 
 data class AgentRoute(
     val task: AgentTaskKind,
@@ -38,6 +28,8 @@ interface AgentModelProvider {
     val id: String
     val isAvailable: Boolean
     fun generate(prompt: String, maxTokens: Int): Flow<String>
+    fun generate(prompt: String, maxTokens: Int, temperature: Double): Flow<String> =
+        generate(prompt, maxTokens)
 }
 
 private object UnavailableLocalProvider : AgentModelProvider {
@@ -59,149 +51,182 @@ private class LocalLlamaProvider(
         engine.sendUserPrompt(prompt, maxTokens)
 }
 
-/** Cloud providers implement the same contract; credentials are stored separately. */
 interface CloudModelProvider : AgentModelProvider
 
 class AgentCoordinator(
     private val local: AgentModelProvider,
     private val cloud: CloudModelProvider? = null,
-    private val visionReady: Boolean = false,
+    private val allowCloud: Boolean = true,
     private val planExecutionMutex: Mutex = Mutex(),
     private val executorRegistry: AgentExecutorRegistry = AgentExecutorRegistry.default(),
     private val taskStore: AgentTaskPersistence? = null
 ) {
     fun capabilities(): List<AgentCapability> = AgentToolRegistry.forRuntime(
         localReady = local.isAvailable,
-        cloudReady = cloud?.isAvailable == true,
-        fileReaderReady = true,
-        visionReady = visionReady
+        cloudReady = allowCloud && cloud?.isAvailable == true,
+        fileReaderReady = true
     ).all()
 
     fun classify(prompt: String): AgentTaskKind {
         val value = prompt.lowercase()
         return when {
-            listOf(
-                "последние новости", "сейчас", "сегодня", "текущая цена",
-                "курс валют", "погода", "найди в интернете", "актуальная информация",
-                "поищи в интернете", "что происходит сегодня"
-            ).any(value::contains) -> AgentTaskKind.CURRENT_INFORMATION
-
-            listOf(
-                "открой", "нажми", "включи", "выключи", "удали", "установи",
-                "запусти приложение", "отправь сообщение", "позвони", "измени настройку"
-            ).any(value::contains) -> AgentTaskKind.DEVICE_ACTION
-
-            listOf(
-                "прикреплённые файлы", "вложенные файлы", "пользователь добавил вложения",
+            listOf("открой", "нажми", "включи", "выключи", "удали", "установи",
+                "запусти приложение", "отправь сообщение", "позвони").any(value::contains) ->
+                AgentTaskKind.DEVICE_ACTION
+            listOf("последние новости", "сейчас", "сегодня", "текущая цена",
+                "курс валют", "погода", "найди в интернете", "актуальная информация").any(value::contains) ->
+                AgentTaskKind.CURRENT_INFORMATION
+            listOf("прикреплённые файлы", "вложенные файлы", "пользователь добавил вложения",
                 "содержимое выбранных пользователем файлов", "прочитай файл",
-                "проанализируй документ", "содержимое документа"
-            ).any(value::contains) -> AgentTaskKind.FILE_ANALYSIS
-
-            listOf(
-                "на изображении", "на этой фотографии", "посмотри фото",
-                "что на картинке", "проанализируй видео", "что изображено"
-            ).any(value::contains) -> AgentTaskKind.IMAGE_ANALYSIS
-
-            listOf(
-                "напиши код", "программа", "функцию на ", "скрипт", "исправь код",
-                "разработай приложение", "реализуй"
-            ).any(value::contains) -> AgentTaskKind.CODE
-
-            listOf(
-                "подробно проанализируй", "сравни варианты", "разбери по шагам",
-                "сложная задача", "составь стратегию", "архитектура"
-            ).any(value::contains) -> AgentTaskKind.COMPLEX_REASONING
-
+                "проанализируй документ", "содержимое документа").any(value::contains) ->
+                AgentTaskKind.FILE_ANALYSIS
+            listOf("на изображении", "на этой фотографии", "посмотри фото",
+                "что на картинке", "проанализируй видео").any(value::contains) ->
+                AgentTaskKind.IMAGE_ANALYSIS
+            listOf("напиши код", "программа", "функцию на ", "скрипт", "исправь код",
+                "разработай приложение", "реализуй").any(value::contains) ->
+                AgentTaskKind.CODE
+            listOf("подробно проанализируй", "сравни варианты", "разбери по шагам",
+                "сложная задача", "составь стратегию", "архитектура").any(value::contains) ->
+                AgentTaskKind.COMPLEX_REASONING
             else -> AgentTaskKind.GENERAL
         }
     }
 
-    fun route(prompt: String, hybridMode: Boolean): AgentRoute {
-        val task = classify(prompt)
+    fun route(
+        prompt: String,
+        hybridMode: Boolean,
+        routing: AgentRoutingConfig = AgentRoutingConfig(),
+        taskOverride: AgentTaskKind? = null
+    ): AgentRoute {
+        val task = taskOverride ?: classify(prompt)
+        val taskId = task.name.lowercase()
+        val cloudPreferred = routing.prefersCloud(taskId)
+        val localOnly = taskId in routing.localOnlyTasks
+        val cloudAllowed = allowCloud && hybridMode && cloudPreferred && !localOnly &&
+            task != AgentTaskKind.CURRENT_INFORMATION
 
-        // Never pretend a language model has executed an Android action or searched the web.
-        when (task) {
-            AgentTaskKind.DEVICE_ACTION -> return AgentRoute(
-                task = task,
-                provider = AgentProviderKind.BLOCKED,
-                reason = "Для этой задачи нужен исполнитель Android-действий.",
-                warning = "Управление Android ещё не подключено. Действие не выполнялось."
-            )
-            AgentTaskKind.CURRENT_INFORMATION -> return AgentRoute(
-                task = task,
-                provider = AgentProviderKind.BLOCKED,
-                reason = "Для этой задачи нужен инструмент интернет-поиска.",
-                warning = "Интернет-поиск ещё не подключён. Актуальные данные не проверялись."
-            )
-            else -> Unit
-        }
-
-        val cloudPreferred = task in setOf(
-            AgentTaskKind.GENERAL,
-            AgentTaskKind.COMPLEX_REASONING,
-            AgentTaskKind.CODE
-        )
-
-        if (hybridMode && cloudPreferred && cloud?.isAvailable == true) {
-            return AgentRoute(
-                task = task,
-                provider = AgentProviderKind.CLOUD,
-                reason = "Задача направлена облачному провайдеру."
-            )
+        if (cloudAllowed && cloud?.isAvailable == true) {
+            return AgentRoute(task, AgentProviderKind.CLOUD, "Задача направлена облачному провайдеру по runtime-маршруту.")
         }
 
         val warning = when {
+            task == AgentTaskKind.FILE_ANALYSIS ->
+                "Выбранные файлы обрабатываются локально. Передача вложений в облако запрещена текущей политикой."
+            task == AgentTaskKind.IMAGE_ANALYSIS ->
+                "Анализ изображений выполняется только совместимым локальным vision-модулем."
+            task == AgentTaskKind.DEVICE_ACTION ->
+                "Инструменты управления Android ещё не подключены. Действие не выполняется."
+            task == AgentTaskKind.CURRENT_INFORMATION && !routing.currentInformationEnabled ->
+                "Поиск актуальной информации выключен в runtime-конфигурации и не подключён в клиенте."
+            task == AgentTaskKind.CURRENT_INFORMATION ->
+                "Флаг поиска включён, но поисковый провайдер ещё не встроен в APK."
             !local.isAvailable -> "Локальная модель не готова."
+            cloudPreferred && !allowCloud ->
+                "Облачный API отключён runtime-настройками. Используется локальная модель."
             hybridMode && cloudPreferred && cloud == null ->
-                "Облачный провайдер ещё не подключён. Используется локальная модель."
+                "Облачный провайдер не подключён. Запрос останется локальным."
             hybridMode && cloudPreferred && cloud?.isAvailable == false ->
                 "Облачный провайдер не настроен. Используется локальная модель."
             else -> null
         }
-
         return AgentRoute(
             task = task,
             provider = AgentProviderKind.LOCAL,
             reason = when {
                 !hybridMode && cloudPreferred -> "Выбран локальный режим."
-                cloudPreferred -> "Используется локальная модель: облачный провайдер недоступен."
-                else -> "Используется локальная модель."
+                cloudPreferred -> "Используется локальная модель согласно fallback-политике."
+                else -> "Используется локальная модель согласно runtime-маршруту."
             },
             warning = warning
         )
     }
 
-    /**
-     * Asks the best available coordinator model to plan complex/code requests, then executes
-     * the validated plan through the existing provider router. Simple requests keep the fast path.
-     */
+    fun generate(
+        prompt: String,
+        maxTokens: Int,
+        hybridMode: Boolean,
+        routing: AgentRoutingConfig = AgentRoutingConfig(),
+        systemPrompt: String = "",
+        temperature: Double = 0.6,
+        taskOverride: AgentTaskKind? = null
+    ): Flow<String> = flow {
+        val decision = route(prompt, hybridMode, routing, taskOverride)
+        val taskId = decision.task.name.lowercase()
+        val cloudWasRequested = hybridMode && routing.prefersCloud(taskId) &&
+            taskId !in routing.localOnlyTasks
+        if (cloudWasRequested && decision.provider == AgentProviderKind.LOCAL &&
+            !routing.fallbackToLocal && allowCloud
+        ) {
+            throw IllegalStateException("Облачный провайдер недоступен, а fallbackToLocal выключен.")
+        }
+
+        val providerLimit = if (decision.provider == AgentProviderKind.CLOUD) {
+            routing.cloudMaxTokens
+        } else routing.localMaxTokens
+        val effectiveMaxTokens = maxTokens.coerceIn(64, 8192).coerceAtMost(providerLimit)
+        Log.i(TAG, "task=${decision.task}, provider=${decision.provider}, reason=${decision.reason}, maxTokens=$effectiveMaxTokens")
+        Log.i(TAG, "capabilities=${capabilities().joinToString { "${it.id}:${it.available}" }}")
+
+        when (decision.provider) {
+            AgentProviderKind.LOCAL -> {
+                check(local.isAvailable) { "Локальная модель не готова к генерации." }
+                emitAll(local.generate(prompt, effectiveMaxTokens))
+            }
+            AgentProviderKind.CLOUD -> {
+                val provider = cloud ?: error("Облачный провайдер не подключён.")
+                check(provider.isAvailable) { "Облачный провайдер не настроен." }
+                val userPrompt = prompt.removeSuffix("/no_think").trimEnd()
+                val providerPrompt = if (systemPrompt.isBlank()) userPrompt else
+                    "Системные инструкции:\n$systemPrompt\n\nЗапрос пользователя:\n$userPrompt"
+                try {
+                    emitAll(provider.generate(providerPrompt, effectiveMaxTokens, temperature.coerceIn(0.0, 2.0)))
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w(TAG, "Cloud request failed; switching to local provider (${error.javaClass.simpleName}).")
+                    check(routing.fallbackToLocal && local.isAvailable) {
+                        "Gemini недоступен (${error.message ?: error.javaClass.simpleName}); локальный fallback запрещён или модель не готова."
+                    }
+                    emit("Gemini недоступен (${error.message ?: error.javaClass.simpleName}). Переключаюсь на локальную модель.\n\n")
+                    emitAll(local.generate(prompt, maxTokens.coerceIn(64, 8192).coerceAtMost(routing.localMaxTokens)))
+                }
+            }
+        }
+    }
+
+
     fun generateWithPlanning(
         prompt: String,
         maxTokens: Int,
-        hybridMode: Boolean
+        hybridMode: Boolean,
+        routing: AgentRoutingConfig = AgentRoutingConfig(),
+        systemPrompt: String = "",
+        temperature: Double = 0.6
     ): Flow<String> = flow {
         val task = classify(prompt)
         val needsPlan = task == AgentTaskKind.CODE || task == AgentTaskKind.COMPLEX_REASONING ||
             prompt.length > 1_200 || listOf("поэтапно", "несколько этапов", "сначала", "затем", "проект целиком")
-                .any { phrase -> prompt.lowercase().contains(phrase) }
+                .any { prompt.lowercase().contains(it) }
         if (!needsPlan) {
-            emitAll(generate(prompt, maxTokens, hybridMode))
+            emitAll(generate(prompt, maxTokens, hybridMode, routing, systemPrompt, temperature))
             return@flow
         }
-
         val plannerProvider = if (hybridMode && cloud?.isAvailable == true) cloud else local
         check(plannerProvider.isAvailable) {
             "Для составления плана нужна доступная модель. Настройте Gemini или загрузите локальную модель."
         }
         val plannerText = StringBuilder()
         try {
-            plannerProvider.generate(AgentTaskPlanner.buildPrompt(prompt), AgentTaskPlanner.MAX_PLANNER_TOKENS)
-                .collect { plannerText.append(it) }
+            plannerProvider.generate(
+                AgentTaskPlanner.buildPrompt(prompt),
+                AgentTaskPlanner.MAX_PLANNER_TOKENS,
+                temperature.coerceIn(0.0, 2.0)
+            ).collect { plannerText.append(it) }
         } catch (error: Exception) {
             if (error is CancellationException) throw error
             Log.w(TAG, "Planning request failed; using single-step execution (${error.javaClass.simpleName}).")
         }
-
         val plan = if (plannerText.isNotBlank()) {
             runCatching { AgentTaskPlanner.parse(plannerText.toString(), prompt) }
                 .onFailure { Log.w(TAG, "Planner response rejected; using single-step execution (${it.javaClass.simpleName}).") }
@@ -210,8 +235,7 @@ class AgentCoordinator(
         val validatedPlan = plan ?: AgentTaskPlan.single(prompt).also {
             emit("Не удалось получить корректный план. Выполняю запрос одним шагом.\n\n")
         }
-
-        executePlan(validatedPlan, maxTokens, hybridMode).collect { event ->
+        executePlan(validatedPlan, maxTokens, hybridMode, routing, systemPrompt, temperature).collect { event ->
             when (event) {
                 is AgentTaskEvent.PlanStarted -> if (event.plan.steps.size > 1) {
                     emit("План: ${event.plan.title} (${event.plan.steps.size} шага).\n\n")
@@ -220,20 +244,20 @@ class AgentCoordinator(
                     emit("\n[${event.index}/${event.total}] ${event.step.title} · ${event.step.agentRole}\n")
                 }
                 is AgentTaskEvent.StepOutput -> emit(event.text)
-                is AgentTaskEvent.StepCompleted -> Unit
-                is AgentTaskEvent.PlanCompleted -> Unit
+                is AgentTaskEvent.StepCompleted, is AgentTaskEvent.PlanCompleted -> Unit
             }
         }
     }
 
-    /** Lists plans interrupted by cancellation or process death and available for resumption. */
     fun resumablePlans(): List<SavedAgentPlan> = taskStore?.listResumable().orEmpty()
 
-    /** Resumes a persisted plan, retaining completed steps and rerunning only unfinished steps. */
     fun resumePlan(
         planId: String,
         maxTokensPerStep: Int,
-        hybridMode: Boolean
+        hybridMode: Boolean,
+        routing: AgentRoutingConfig = AgentRoutingConfig(),
+        systemPrompt: String = "",
+        temperature: Double = 0.6
     ): Flow<AgentTaskEvent> = flow {
         val store = taskStore ?: throw IllegalStateException("Хранилище задач не подключено.")
         val saved = store.loadPlan(planId)
@@ -242,14 +266,16 @@ class AgentCoordinator(
             store.setStepStatus(planId, step.step.id, AgentStepStatus.PENDING)
         }
         store.setPlanStatus(planId, AgentPlanStatus.RUNNING)
-        emitAll(executePlan(saved.plan, maxTokensPerStep, hybridMode))
+        emitAll(executePlan(saved.plan, maxTokensPerStep, hybridMode, routing, systemPrompt, temperature))
     }
 
-    /** Executes sequentially and journals each completed step for safe process-death recovery. */
     fun executePlan(
         plan: AgentTaskPlan,
         maxTokensPerStep: Int,
-        hybridMode: Boolean
+        hybridMode: Boolean,
+        routing: AgentRoutingConfig = AgentRoutingConfig(),
+        systemPrompt: String = "",
+        temperature: Double = 0.6
     ): Flow<AgentTaskEvent> = flow {
         plan.validate()
         taskStore?.savePlan(plan)
@@ -263,7 +289,6 @@ class AgentCoordinator(
                 saved?.steps?.filter { it.status == AgentStepStatus.COMPLETED }?.forEach {
                     results[it.step.id] = it.result
                 }
-
                 plan.steps.forEachIndexed { index, step ->
                     if (saved?.steps?.firstOrNull { it.step.id == step.id }?.status == AgentStepStatus.COMPLETED) {
                         emit(AgentTaskEvent.StepCompleted(step, results.getValue(step.id)))
@@ -288,9 +313,8 @@ class AgentCoordinator(
                         append("Выполни только это задание. Не утверждай, что внешние действия выполнены, если они не запускались и не проверялись.")
                     }
                     val result = StringBuilder()
-                    val executor = executorRegistry.resolve(step.agentRole)
-                    executor.execute(stepPrompt, maxTokensPerStep) { specializedPrompt, tokenLimit ->
-                        generate(specializedPrompt, tokenLimit, hybridMode)
+                    executorRegistry.resolve(step.agentRole).execute(stepPrompt, maxTokensPerStep) { specializedPrompt, tokenLimit ->
+                        generate(specializedPrompt, tokenLimit, hybridMode, routing, systemPrompt, temperature)
                     }.collect { chunk ->
                         result.append(chunk)
                         emit(AgentTaskEvent.StepOutput(step.id, chunk))
@@ -315,62 +339,30 @@ class AgentCoordinator(
         }
     }
 
-    fun generate(prompt: String, maxTokens: Int, hybridMode: Boolean): Flow<String> = flow {
-        val decision = route(prompt, hybridMode)
-        Log.i(TAG, "task=${decision.task}, provider=${decision.provider}, reason=${decision.reason}")
-        Log.i(TAG, "capabilities=${capabilities().joinToString { "${it.id}:${it.available}" }}")
-
-        if (decision.provider == AgentProviderKind.BLOCKED) {
-            throw IllegalStateException(decision.warning ?: decision.reason)
-        }
-
-        val providerPrompt = if (decision.provider == AgentProviderKind.CLOUD) {
-            prompt.removeSuffix("/no_think").trimEnd()
-        } else prompt
-
-        when (decision.provider) {
-            AgentProviderKind.LOCAL -> {
-                check(local.isAvailable) { decision.warning ?: "Локальная модель не готова к генерации." }
-                emitAll(local.generate(prompt, maxTokens))
-            }
-            AgentProviderKind.CLOUD -> {
-                val provider = cloud ?: error("Облачный провайдер не подключён.")
-                check(provider.isAvailable) { "Облачный провайдер не настроен." }
-                var cloudProducedOutput = false
-                provider.generate(providerPrompt, maxTokens)
-                    .onEach { chunk -> if (chunk.isNotEmpty()) cloudProducedOutput = true }
-                    .catch { error ->
-                        if (error is CancellationException) throw error
-                        // Do not append a second answer after a provider has already emitted text.
-                        if (cloudProducedOutput) throw error
-                        Log.w(TAG, "Cloud request failed; considering local fallback (${error.javaClass.simpleName}).")
-                        check(local.isAvailable) {
-                            "Gemini недоступен (${error.message ?: error.javaClass.simpleName}), локальная модель не готова."
-                        }
-                        emit("Gemini недоступен (${error.message ?: error.javaClass.simpleName}). Переключаюсь на локальную модель.\n\n")
-                        emitAll(local.generate(prompt, maxTokens))
-                    }
-                    .collect { emit(it) }
-            }
-            AgentProviderKind.BLOCKED -> error("Заблокированный маршрут не должен запускать генерацию.")
-        }
-    }
-
     companion object {
         private const val TAG = "AgentCoordinator"
 
         fun forLocalEngine(engine: InferenceEngine): AgentCoordinator =
-            AgentCoordinator(
-                local = LocalLlamaProvider(engine),
-                visionReady = (engine as? VisionInferenceEngine)?.isVisionReady() == true
-            )
+            AgentCoordinator(LocalLlamaProvider(engine))
 
-        fun forContext(context: Context, engine: InferenceEngine?): AgentCoordinator {
+        fun forContext(
+            context: Context,
+            engine: InferenceEngine?,
+            allowCloud: Boolean = true,
+            cloudModelId: String = "gemini-3.5-flash-lite",
+            connectTimeoutSeconds: Int = 15,
+            readTimeoutSeconds: Int = 60
+        ): AgentCoordinator {
             val keyStore = GeminiApiKeyStore(context.applicationContext)
             return AgentCoordinator(
                 local = engine?.let(::LocalLlamaProvider) ?: UnavailableLocalProvider,
-                cloud = GeminiCloudProvider(keyStore),
-                visionReady = (engine as? VisionInferenceEngine)?.isVisionReady() == true,
+                cloud = if (allowCloud) GeminiCloudProvider(
+                    keyStore,
+                    model = cloudModelId,
+                    connectTimeoutMs = connectTimeoutSeconds.coerceIn(5, 120) * 1000,
+                    readTimeoutMs = readTimeoutSeconds.coerceIn(5, 300) * 1000
+                ) else null,
+                allowCloud = allowCloud,
                 taskStore = AgentTaskStore.get(context.applicationContext)
             )
         }

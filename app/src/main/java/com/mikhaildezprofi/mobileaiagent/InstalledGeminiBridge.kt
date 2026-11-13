@@ -1,8 +1,8 @@
 package com.mikhaildezprofi.mobileaiagent
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.content.ActivityNotFoundException
 import android.content.pm.PackageManager
 import android.os.Build
 

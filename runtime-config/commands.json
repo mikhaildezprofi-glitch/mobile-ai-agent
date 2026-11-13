@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "commands": [
+    { "id": "new_chat", "phrases": ["новый чат", "начать заново"], "action": "ui.new_chat", "enabled": true },
+    { "id": "open_settings", "phrases": ["открой настройки", "настройки"], "action": "ui.open_settings", "enabled": true },
+    { "id": "open_diagnostics", "phrases": ["диагностика", "покажи состояние"], "action": "ui.open_diagnostics", "enabled": true },
+    { "id": "stop_generation", "phrases": ["останови ответ", "стоп"], "action": "generation.cancel", "enabled": true }
+  ],
+  "safety": {
+    "unknownActionsAreRejected": true,
+    "destructiveActionsRequireConfirmation": true,
+    "remoteCommandsAreNotExecutable": true
+  }
+}

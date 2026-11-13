@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "cloudUploadsRequireExplicitUserAction": true,
+  "attachmentsCloudUploadDefault": false,
+  "cameraCloudUploadDefault": false,
+  "apiKeysInRemoteConfig": false,
+  "apiKeysInLogs": false,
+  "privateFilesInDiagnostics": false,
+  "allowRemoteExecutableContent": false,
+  "retainLastKnownGoodConfig": true
+}

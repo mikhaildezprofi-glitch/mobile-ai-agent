@@ -1,0 +1,183 @@
+name: GitLab Canonical Sync
+
+on:
+  push:
+    branches: [ main ]
+  repository_dispatch:
+    types: [ gitlab-main-updated ]
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: gitlab-canonical-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-and-dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout GitHub mirror
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_SYNC_TOKEN }}
+
+      - name: Sync canonical GitLab main and build ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add gitlab https://gitlab.com/lenives777/mobile-ai-agent.git
+          git fetch --no-tags gitlab refs/heads/main:refs/remotes/gitlab/main
+
+          SOURCE_SHA="$(git rev-parse refs/remotes/gitlab/main)"
+          GH_MAIN_SHA="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [[ -z "$GH_MAIN_SHA" ]]; then
+            echo "GitHub main branch could not be resolved."
+            exit 1
+          fi
+
+          if [[ "$SOURCE_SHA" != "$GH_MAIN_SHA" ]]; then
+            ARCHIVE_REF="refs/heads/archive/github-main-before-sync-${GITHUB_RUN_ID}"
+            git push origin "${GH_MAIN_SHA}:${ARCHIVE_REF}"
+            git push --force origin "${SOURCE_SHA}:refs/heads/main"
+            echo "GitHub main updated from GitLab: ${GH_MAIN_SHA} -> ${SOURCE_SHA}"
+          else
+            echo "GitHub main already matches GitLab main: ${SOURCE_SHA}"
+          fi
+
+          GH_SYNC_SHA="$(git ls-remote origin refs/heads/sync/current | awk '{print $1}')"
+          if [[ "$GH_SYNC_SHA" != "$SOURCE_SHA" ]]; then
+            git push --force origin "${SOURCE_SHA}:refs/heads/sync/current"
+            echo "Build/config ref sync/current updated to ${SOURCE_SHA}"
+          else
+            echo "Build/config ref sync/current already matches ${SOURCE_SHA}"
+          fi
+
+          echo "SOURCE_SHA=${SOURCE_SHA}" >> "$GITHUB_ENV"
+          echo "GH_MAIN_SHA=${GH_MAIN_SHA}" >> "$GITHUB_ENV"
+
+      - name: Validate runtime configuration bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git cat-file -e "${SOURCE_SHA}:scripts/validate-runtime-config.py" 2>/dev/null; then
+            git show "${SOURCE_SHA}:scripts/validate-runtime-config.py" > /tmp/validate-runtime-config.py
+            mkdir -p /tmp/runtime-config-check
+            git archive "${SOURCE_SHA}" runtime-config | tar -x -C /tmp/runtime-config-check
+            cp /tmp/validate-runtime-config.py /tmp/runtime-config-check/scripts-validator.py
+            sed -i 's|ROOT = Path(__file__).resolve().parents\[1\] / "runtime-config"|ROOT = Path(__file__).resolve().parent / "runtime-config"|' /tmp/runtime-config-check/scripts-validator.py
+            python3 /tmp/runtime-config-check/scripts-validator.py
+          else
+            echo "No runtime config bundle in this source revision; skipping."
+          fi
+
+      - name: Verify GitLab source is build-ready
+        id: readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "${SOURCE_SHA}:gradle/libs.versions.toml" 2>/dev/null; then
+            echo "build_ready=false" >> "$GITHUB_OUTPUT"
+            echo "GitLab main is synced, but APK build is deferred: gradle/libs.versions.toml is not present yet."
+            exit 0
+          fi
+          if ! git cat-file -e "${SOURCE_SHA}:scripts/patch-llama-diagnostics.py" 2>/dev/null; then
+            echo "build_ready=false" >> "$GITHUB_OUTPUT"
+            echo "GitLab source is missing the required llama.cpp patch script."
+            exit 0
+          fi
+          echo "build_ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Detect Android build-affecting changes since last release
+        if: steps.readiness.outputs.build_ready == 'true'
+        id: build_impact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA="$(gh run list --workflow android-build.yml --branch sync/current --status success --limit 1 --json headSha --jq '.[0].headSha // empty')"
+          if [[ -z "$BASE_SHA" ]]; then
+            BASE_SHA="$(git rev-list --max-parents=0 "$SOURCE_SHA" | tail -n 1)"
+            echo "No successful Android build found; comparing from repository root."
+          fi
+
+          echo "Comparison base: $BASE_SHA"
+          CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$SOURCE_SHA")"
+          printf '%s\n' "$CHANGED_FILES"
+
+          BUILD_REQUIRED=false
+          while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
+            case "$path" in
+              app/*|llama/*|gradle/*|third_party/*|build.gradle.kts|settings.gradle.kts|gradle.properties|gradlew|gradlew.bat|scripts/patch-llama-diagnostics.py)
+                BUILD_REQUIRED=true
+                ;;
+            esac
+          done <<< "$CHANGED_FILES"
+
+          echo "build_required=$BUILD_REQUIRED" >> "$GITHUB_OUTPUT"
+          echo "baseline_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          if [[ "$BUILD_REQUIRED" == "false" ]]; then
+            echo "Only runtime data/docs or non-APK files changed. Android build is skipped."
+          fi
+
+      - name: Check release and existing build attempts
+        if: steps.readiness.outputs.build_ready == 'true' && steps.build_impact.outputs.build_required == 'true'
+        id: build_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREFIX="build-${SOURCE_SHA:0:12}-"
+
+          RELEASE="$(gh release list --limit 100 --json tagName | jq -r --arg prefix "$PREFIX" '.[] | select(.tagName | startswith($prefix)) | .tagName' || true)"
+          if [[ -n "$RELEASE" ]]; then
+            echo "dispatch=false" >> "$GITHUB_OUTPUT"
+            echo "A release already exists for source ${SOURCE_SHA}."
+            exit 0
+          fi
+
+          RUNS="$(gh run list --workflow android-build.yml --branch sync/current --limit 20 --json status,headSha,conclusion)"
+          ACTIVE_SHA="$(printf '%s' "$RUNS" | jq -r '.[] | select(.status == "queued" or .status == "in_progress") | .headSha' | head -n 1)"
+          if [[ -n "$ACTIVE_SHA" ]]; then
+            if git cat-file -e "${ACTIVE_SHA}^{commit}" 2>/dev/null && git merge-base --is-ancestor "$ACTIVE_SHA" "$SOURCE_SHA"; then
+              ACTIVE_CHANGED="$(git diff --name-only "$ACTIVE_SHA" "$SOURCE_SHA")"
+              ACTIVE_NEEDS_BUILD=false
+              while IFS= read -r path; do
+                [[ -z "$path" ]] && continue
+                case "$path" in
+                  app/*|llama/*|gradle/*|third_party/*|build.gradle.kts|settings.gradle.kts|gradle.properties|gradlew|gradlew.bat|scripts/patch-llama-diagnostics.py)
+                    ACTIVE_NEEDS_BUILD=true
+                    ;;
+                esac
+              done <<< "$ACTIVE_CHANGED"
+              if [[ "$ACTIVE_NEEDS_BUILD" == "false" ]]; then
+                echo "dispatch=false" >> "$GITHUB_OUTPUT"
+                echo "An active build for ${ACTIVE_SHA} already includes all Android-affecting changes; later commits only changed non-APK files."
+                exit 0
+              fi
+            fi
+          fi
+
+          COMPLETED="$(printf '%s' "$RUNS" | jq -r --arg sha "$SOURCE_SHA" '.[] | select(.headSha == $sha and .status == "completed") | .conclusion' | head -n 1)"
+          if [[ -n "$COMPLETED" ]]; then
+            echo "dispatch=false" >> "$GITHUB_OUTPUT"
+            echo "A build for source ${SOURCE_SHA} already completed with conclusion: ${COMPLETED}. No duplicate build will be started."
+            exit 0
+          fi
+
+          echo "dispatch=true" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch Android APK build
+        if: steps.readiness.outputs.build_ready == 'true' && steps.build_impact.outputs.build_required == 'true' && steps.build_check.outputs.dispatch == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run android-build.yml --ref sync/current

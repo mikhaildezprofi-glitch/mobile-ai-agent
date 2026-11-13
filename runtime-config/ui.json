@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "inputMaxLines": 1,
+  "composer": {
+    "placeholderNewChat": "Спросить AI",
+    "placeholderReply": "Ответить AI",
+    "enterKeyAction": "newline",
+    "expandable": true,
+    "controlsPinnedToBottom": true
+  },
+  "chat": {
+    "autoScrollDuringGeneration": true,
+    "showModelReasoning": false,
+    "showProviderDiagnosticsByDefault": false
+  },
+  "limits": {
+    "maxPromptCharacters": 24000,
+    "maxAttachmentCount": 10,
+    "maxHistoryMessages": 100
+  }
+}

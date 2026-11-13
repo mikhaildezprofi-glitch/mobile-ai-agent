@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.geometry.Offset
@@ -60,8 +61,9 @@ import com.arm.aichat.InferenceEngine
 import com.arm.aichat.VisionInferenceEngine
 import com.mikhaildezprofi.mobileaiagent.AgentCoordinator
 import com.mikhaildezprofi.mobileaiagent.AgentTaskStore
-import com.mikhaildezprofi.mobileaiagent.SavedAgentPlan
-import com.mikhaildezprofi.mobileaiagent.AgentTaskEvent
+import com.mikhaildezprofi.mobileaiagent.AgentTaskKind
+import com.mikhaildezprofi.mobileaiagent.AppBackupManager
+import com.mikhaildezprofi.mobileaiagent.VisionModelAssets
 import com.mikhaildezprofi.mobileaiagent.AgentProviderKind
 import com.mikhaildezprofi.mobileaiagent.ImageAttachmentSource
 import com.mikhaildezprofi.mobileaiagent.ImageAttachmentStager
@@ -69,9 +71,11 @@ import com.mikhaildezprofi.mobileaiagent.VideoFrameExtractor
 import com.mikhaildezprofi.mobileaiagent.AgentToolRegistry
 import com.mikhaildezprofi.mobileaiagent.SafeDocumentReader
 import com.mikhaildezprofi.mobileaiagent.GeminiApiKeyStore
+import com.mikhaildezprofi.mobileaiagent.GeminiCloudProvider
 import com.mikhaildezprofi.mobileaiagent.InstalledGeminiBridge
 import com.mikhaildezprofi.mobileaiagent.AgentRuntimeConfig
 import com.mikhaildezprofi.mobileaiagent.RuntimeFiles
+import com.mikhaildezprofi.mobileaiagent.RuntimeConfigUpdater
 import com.mikhaildezprofi.mobileaiagent.GenerationForegroundService
 import com.mikhaildezprofi.mobileaiagent.BackgroundGenerationController
 import com.mikhaildezprofi.mobileaiagent.DevicePerformanceMonitor
@@ -255,6 +259,7 @@ private const val MAX_CHAT_ATTACHMENTS = 10
 private fun addAttachmentsSafely(
     target: MutableList<ChatAttachment>,
     incoming: List<ChatAttachment>,
+    maxCount: Int = MAX_CHAT_ATTACHMENTS,
     onLimitReached: () -> Unit
 ) {
     var limitReached = false
@@ -263,7 +268,7 @@ private fun addAttachmentsSafely(
             attachment.uri != null && existing.uri == attachment.uri && existing.type == attachment.type
         }
         if (duplicate) return@forEach
-        if (target.size >= MAX_CHAT_ATTACHMENTS) {
+        if (target.size >= maxCount.coerceIn(1, MAX_CHAT_ATTACHMENTS)) {
             limitReached = true
         } else {
             target.add(attachment)
@@ -277,6 +282,9 @@ private fun addAttachmentsSafely(
 fun MainScreen() {
     val context = LocalContext.current
     val appContext = context.applicationContext
+    val appVersion = remember(appContext) {
+        appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: "неизвестна"
+    }
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val geminiKeyStore = remember { GeminiApiKeyStore(appContext) }
@@ -284,12 +292,17 @@ fun MainScreen() {
     var geminiAppStatus by remember { mutableStateOf("") }
     var geminiApiKeyDraft by remember { mutableStateOf("") }
     var geminiKeyConfigured by remember { mutableStateOf(geminiKeyStore.hasKey()) }
+    var geminiTestBusy by remember { mutableStateOf(false) }
+    var geminiTestStatus by remember { mutableStateOf("") }
     var geminiKeyStatus by remember {
         mutableStateOf(if (geminiKeyStore.hasKey()) "Ключ сохранён в Android Keystore." else "Ключ не настроен.")
     }
 
     var mode by remember {
-        mutableStateOf(if (geminiKeyStore.hasKey()) AgentMode.HYBRID else AgentMode.LOCAL)
+        mutableStateOf(
+            if (RuntimeFiles.initialHybridMode(appContext, geminiKeyStore.hasKey())) AgentMode.HYBRID
+            else AgentMode.LOCAL
+        )
     }
     var status by remember { mutableStateOf("Инициализация llama.cpp…") }
     var diagnostics by remember { mutableStateOf(false) }
@@ -308,9 +321,26 @@ fun MainScreen() {
     var showDiagnosticsDialog by remember { mutableStateOf(false) }
     var showCapabilitiesDialog by remember { mutableStateOf(false) }
     var showTaskHistoryDialog by remember { mutableStateOf(false) }
-    var selectedTaskPlan by remember { mutableStateOf<SavedAgentPlan?>(null) }
-    var planPendingDeletion by remember { mutableStateOf<SavedAgentPlan?>(null) }
-    var agentTaskHistory by remember { mutableStateOf<List<SavedAgentPlan>>(emptyList()) }
+    var selectedTaskPlan by remember { mutableStateOf<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan?>(null) }
+    var planPendingDeletion by remember { mutableStateOf<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan?>(null) }
+    var agentTaskHistory by remember { mutableStateOf<List<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan>>(emptyList()) }
+    var visionDownloadBusy by remember { mutableStateOf(false) }
+    var visionDownloadProgress by remember { mutableFloatStateOf(0f) }
+    val visionAssetsInitiallyInstalled = remember(appContext) {
+        VisionModelAssets.areAssetsPresent(appContext)
+    }
+    var visionDownloadStatus by remember {
+        mutableStateOf(
+            if (visionAssetsInitiallyInstalled) {
+                "Файлы SmolVLM найдены. SHA-256 будет проверен перед загрузкой."
+            } else {
+                "Vision-модель ещё не установлена."
+            }
+        )
+    }
+    val qwenModelFile = remember(appContext) {
+        File(appContext.filesDir, "models/Qwen3-1.7B-Q4_K_M.gguf")
+    }
 
     // Runtime files are editable independently from the installed APK.
     var runtimeFiles by remember { mutableStateOf(RuntimeFiles.load(appContext)) }
@@ -318,33 +348,76 @@ fun MainScreen() {
     var systemPrompt by remember { mutableStateOf(runtimeFiles.systemPrompt) }
     var promptDraft by remember { mutableStateOf(systemPrompt) }
     var configDraft by remember { mutableStateOf(runtimeConfig) }
+    var runtimeUpdateInProgress by remember { mutableStateOf(false) }
+    var selectedPromptProfileId by remember { mutableStateOf(runtimeConfig.selectedPromptProfileId) }
+    var selectedResponseProfileId by remember { mutableStateOf(runtimeConfig.selectedResponseProfileId) }
+    var promptProfileMenuExpanded by remember { mutableStateOf(false) }
+    var responseProfileMenuExpanded by remember { mutableStateOf(false) }
 
     val messages = ChatSessionState.messages
     val chatHistory = remember { mutableStateListOf<SavedChat>().apply { addAll(loadSavedChats(appContext)) } }
     var currentChatId by ChatSessionState.currentChatId
     val chatListState = rememberLazyListState()
-    var resumableAgentPlans by remember { mutableStateOf<List<SavedAgentPlan>>(emptyList()) }
 
-    // Restore the most recently saved chat after Android has recreated the process.
-    // Activity recreation in the same process keeps ChatSessionState and skips this path.
-    LaunchedEffect(appContext) {
-        if (messages.isEmpty()) {
-            val latestSavedChat = chatHistory.firstOrNull()
-            if (latestSavedChat != null) {
-                messages.addAll(latestSavedChat.messages)
-                currentChatId = latestSavedChat.id
+    val backupExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { AppBackupManager.export(appContext, uri) }
+            }.onSuccess {
+                status = "Резервная копия сохранена. Gemini API-ключ и файл модели в неё не входят."
+            }.onFailure { error ->
+                status = "Не удалось создать резервную копию: ${error.message ?: "ошибка"}"
+            }
+        }
+    }
+    val backupImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { AppBackupManager.restore(appContext, uri) }
+            }.onSuccess {
+                chatHistory.clear()
+                chatHistory.addAll(loadSavedChats(appContext))
+                messages.clear()
+                val latest = chatHistory.firstOrNull()
+                if (latest != null) {
+                    messages.addAll(latest.messages.takeLast(runtimeConfig.maxHistoryMessages))
+                    currentChatId = latest.id
+                } else {
+                    currentChatId = System.currentTimeMillis().toString()
+                }
+                runtimeFiles = RuntimeFiles.load(appContext)
+                runtimeConfig = runtimeFiles.config
+                systemPrompt = runtimeFiles.systemPrompt
+                promptDraft = systemPrompt
+                configDraft = runtimeConfig
+                selectedPromptProfileId = runtimeConfig.selectedPromptProfileId
+                selectedResponseProfileId = runtimeConfig.selectedResponseProfileId
+                mode = if (RuntimeFiles.initialHybridMode(appContext, geminiKeyStore.hasKey())) {
+                    AgentMode.HYBRID
+                } else AgentMode.LOCAL
+                status = "Данные восстановлены. Gemini API-ключ нужно настроить заново; модель Qwen можно выбрать из Download."
+            }.onFailure { error ->
+                status = "Не удалось восстановить резервную копию: ${error.message ?: "ошибка"}"
             }
         }
     }
 
-    // Discover interrupted task plans after startup or when a generation ends.
-    LaunchedEffect(appContext, busy) {
-        if (!busy) {
-            val history = withContext(Dispatchers.IO) {
-                AgentTaskStore.get(appContext).listHistory()
+    // Apply runtime history limits immediately, including after a remote config refresh.
+    LaunchedEffect(runtimeConfig.maxHistoryMessages) {
+        while (messages.size > runtimeConfig.maxHistoryMessages) messages.removeAt(0)
+    }
+
+    LaunchedEffect(appContext) {
+        if (messages.isEmpty()) {
+            val latestSavedChat = chatHistory.firstOrNull()
+            if (latestSavedChat != null) {
+                messages.addAll(latestSavedChat.messages.takeLast(runtimeConfig.maxHistoryMessages))
+                currentChatId = latestSavedChat.id
             }
-            agentTaskHistory = history
-            resumableAgentPlans = history.filter { it.canResume }
         }
     }
 
@@ -405,17 +478,47 @@ fun MainScreen() {
     }
 
     // Keep the newest text visible without forcing a scroll/recomposition on every token.
-    LaunchedEffect(messages.size, busy) {
-        if (busy) {
-            while (busy) {
-                if (messages.isNotEmpty()) chatListState.scrollToItem(messages.size)
-                delay(250)
+    LaunchedEffect(messages.size, busy, runtimeConfig.autoScrollDuringGeneration) {
+        if (runtimeConfig.autoScrollDuringGeneration) {
+            if (busy) {
+                while (busy) {
+                    if (messages.isNotEmpty()) chatListState.scrollToItem(messages.size)
+                    delay(250)
+                }
+            } else if (messages.isNotEmpty()) {
+                chatListState.scrollToItem(messages.size)
             }
-        } else if (messages.isNotEmpty()) {
-            chatListState.scrollToItem(messages.size)
         }
     }
     val attachments = remember { mutableStateListOf<ChatAttachment>() }
+    // One coordinator belongs to the chat session and is rebuilt only when provider
+    // settings or the loaded local engine change.
+    val coordinator = remember(
+        engine,
+        runtimeConfig.geminiApiEnabled,
+        runtimeConfig.geminiModelId,
+        runtimeConfig.networkConnectTimeoutSeconds,
+        runtimeConfig.networkReadTimeoutSeconds
+    ) {
+        AgentCoordinator.forContext(
+            appContext,
+            engine,
+            allowCloud = runtimeConfig.geminiApiEnabled,
+            cloudModelId = runtimeConfig.geminiModelId,
+            connectTimeoutSeconds = runtimeConfig.networkConnectTimeoutSeconds,
+            readTimeoutSeconds = runtimeConfig.networkReadTimeoutSeconds
+        )
+    }
+
+    // Restore the most recently saved chat after Android has recreated the process.
+    // Activity recreation in the same process keeps ChatSessionState and skips this path.
+    LaunchedEffect(coordinator, busy) {
+        if (!busy) {
+            agentTaskHistory = withContext(Dispatchers.IO) {
+                AgentTaskStore.get(appContext).listHistory()
+            }
+        }
+    }
 
     LaunchedEffect(appContext) {
         try {
@@ -594,6 +697,61 @@ fun MainScreen() {
         }
     }
 
+    suspend fun activateModelFileNow(modelFile: File, projectorFile: File?) {
+        val activeEngine = engine ?: error("Нативный движок ещё не инициализирован.")
+        check(modelFile.isFile && modelFile.canRead() && modelFile.length() > 0L) {
+            "Файл модели не найден или недоступен."
+        }
+        status = "Освобождение памяти и загрузка ${modelFile.name}…"
+        withContext(Dispatchers.IO) {
+            if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
+                activeEngine.state.value is InferenceEngine.State.Error
+            ) activeEngine.cleanUp()
+            activeEngine.loadModel(modelFile.absolutePath)
+            if (systemPrompt.isNotBlank()) activeEngine.setSystemPrompt(systemPrompt)
+            if (projectorFile != null) {
+                check(projectorFile.isFile && projectorFile.canRead() && projectorFile.length() > 0L) {
+                    "Vision-проектор не найден."
+                }
+                val vision = activeEngine as? VisionInferenceEngine
+                    ?: error("Нативная библиотека не поддерживает vision.")
+                vision.loadVisionProjector(projectorFile.absolutePath)
+            }
+        }
+        val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+        val editor = preferences.edit().putString("model_path", modelFile.absolutePath)
+        if (projectorFile != null) {
+            editor.putString("vision_mmproj_path", projectorFile.absolutePath)
+        } else {
+            editor.remove("vision_mmproj_path")
+        }
+        check(editor.commit()) { "Не удалось сохранить выбранную модель." }
+        modelReady = activeEngine.state.value is InferenceEngine.State.ModelReady
+        visionRevision++
+        check(modelReady) { "Движок не подтвердил готовность модели." }
+        status = if (projectorFile != null) {
+            "SmolVLM загружена вместе с проверенным vision-проектором. Анализ фото включён."
+        } else {
+            "Qwen загружена. Локальный текстовый режим активен."
+        }
+    }
+
+    fun activateModelFile(modelFile: File, projectorFile: File?) {
+        if (busy || visionDownloadBusy) return
+        scope.launch {
+            busy = true
+            try {
+                activateModelFileNow(modelFile, projectorFile)
+            } catch (error: Exception) {
+                modelReady = engine?.state?.value is InferenceEngine.State.ModelReady
+                visionRevision++
+                status = "Не удалось переключить модель: ${error.message ?: error.javaClass.simpleName}"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     fun retainReadPermission(uri: Uri) {
         runCatching {
             appContext.contentResolver.takePersistableUriPermission(
@@ -628,8 +786,8 @@ fun MainScreen() {
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach(::retainReadPermission)
-        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Файл", it) }) {
-            status = "Можно добавить не более $MAX_CHAT_ATTACHMENTS вложений в одно сообщение."
+        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Файл", it) }, runtimeConfig.maxAttachmentCount) {
+            status = "Можно добавить не более ${runtimeConfig.maxAttachmentCount} вложений в одно сообщение."
         }
     }
 
@@ -637,8 +795,8 @@ fun MainScreen() {
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach(::retainReadPermission)
-        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Фото", it) }) {
-            status = "Можно добавить не более $MAX_CHAT_ATTACHMENTS вложений в одно сообщение."
+        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Фото", it) }, runtimeConfig.maxAttachmentCount) {
+            status = "Можно добавить не более ${runtimeConfig.maxAttachmentCount} вложений в одно сообщение."
         }
     }
 
@@ -646,8 +804,8 @@ fun MainScreen() {
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach(::retainReadPermission)
-        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Видео", it) }) {
-            status = "Можно добавить не более $MAX_CHAT_ATTACHMENTS вложений в одно сообщение."
+        addAttachmentsSafely(attachments, uris.map { ChatAttachment(displayName(it), "Видео", it) }, runtimeConfig.maxAttachmentCount) {
+            status = "Можно добавить не более ${runtimeConfig.maxAttachmentCount} вложений в одно сообщение."
         }
     }
 
@@ -655,8 +813,8 @@ fun MainScreen() {
         ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
         if (bitmap != null) {
-            addAttachmentsSafely(attachments, listOf(ChatAttachment("Фото с камеры", "Фото", bitmap = bitmap))) {
-                status = "Можно добавить не более $MAX_CHAT_ATTACHMENTS вложений в одно сообщение."
+            addAttachmentsSafely(attachments, listOf(ChatAttachment("Фото с камеры", "Фото", bitmap = bitmap)), runtimeConfig.maxAttachmentCount) {
+                status = "Можно добавить не более ${runtimeConfig.maxAttachmentCount} вложений в одно сообщение."
             }
         }
     }
@@ -683,7 +841,7 @@ fun MainScreen() {
                             RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                             RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                         )
-                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, runtimeConfig.voiceLanguage)
                         putExtra(RecognizerIntent.EXTRA_PROMPT, "Говорите…")
                         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                     }
@@ -712,108 +870,101 @@ fun MainScreen() {
         else status = "Доступ к микрофону не предоставлен."
     }
 
-    fun resumeSavedAgentPlan(saved: SavedAgentPlan) {
-        if (busy) return
-        val hybridMode = mode == AgentMode.HYBRID && geminiKeyConfigured
-        if (!modelReady && !hybridMode) {
-            status = "Для продолжения задачи загрузите локальную модель или настройте Gemini."
-            return
+    fun refreshAgentTaskHistory() {
+        scope.launch {
+            agentTaskHistory = withContext(Dispatchers.IO) {
+                AgentTaskStore.get(appContext).listHistory()
+            }
         }
+    }
+
+    fun resumeSavedAgentPlan(saved: com.mikhaildezprofi.mobileaiagent.SavedAgentPlan) {
+        if (busy) return
         messages.add(ChatMessage("Вы", "Продолжить задачу: ${saved.plan.title}"))
         messages.add(ChatMessage("MOBILE AI", ""))
-        currentChatId = System.currentTimeMillis().toString()
         busy = true
-        status = "Восстановление задачи…"
-        val coordinator = AgentCoordinator.forContext(appContext, engine)
-        try {
-            ContextCompat.startForegroundService(
-                appContext,
-                Intent(appContext, GenerationForegroundService::class.java)
-                    .setAction(GenerationForegroundService.ACTION_START)
-                    .putExtra(GenerationForegroundService.EXTRA_LOCAL_INFERENCE, !hybridMode)
-            )
-        } catch (error: Exception) {
-            busy = false
-            status = "Не удалось запустить фоновую службу: ${error.message ?: error.javaClass.simpleName}"
-            return
-        }
-        val job = BackgroundGenerationController.scope.launch {
-            val pending = StringBuilder()
-            suspend fun flush() {
-                if (pending.isEmpty()) return
-                val chunk = pending.toString()
-                pending.setLength(0)
-                withContext(Dispatchers.Main) {
-                    val index = messages.lastIndex
-                    if (index >= 0) messages[index] = messages[index].copy(text = messages[index].text + chunk)
-                }
-            }
-            var title = "Ответ готов"
-            var notification = "Продолженная задача завершена. Нажмите, чтобы открыть чат."
+        status = "Возобновляю сохранённую задачу…"
+        val resumeJob = BackgroundGenerationController.scope.launch {
+            var notificationTitle = "Ответ готов"
+            var notificationMessage = "MOBILE AI завершил продолжение задачи."
             try {
+                ContextCompat.startForegroundService(
+                    appContext,
+                    Intent(appContext, GenerationForegroundService::class.java)
+                        .setAction(GenerationForegroundService.ACTION_START)
+                        .putExtra(
+                            GenerationForegroundService.EXTRA_LOCAL_INFERENCE,
+                            mode == AgentMode.LOCAL || !geminiKeyConfigured
+                        )
+                )
                 withContext(Dispatchers.IO) {
-                    coordinator.resumePlan(saved.plan.id, 4096, hybridMode).collect { event ->
-                        if (event is AgentTaskEvent.StepOutput) pending.append(event.text)
-                        if (pending.length >= 256) flush()
+                    coordinator.resumePlan(
+                        planId = saved.plan.id,
+                        maxTokensPerStep = runtimeConfig.maxOutputTokens,
+                        hybridMode = mode == AgentMode.HYBRID && geminiKeyConfigured,
+                        routing = runtimeConfig.routing,
+                        systemPrompt = systemPrompt,
+                        temperature = runtimeConfig.temperature
+                    ).collect { event ->
+                        if (event is com.mikhaildezprofi.mobileaiagent.AgentTaskEvent.StepOutput) {
+                            withContext(Dispatchers.Main) {
+                                val index = messages.lastIndex
+                                if (index >= 0) {
+                                    messages[index] = messages[index].copy(text = messages[index].text + event.text)
+                                }
+                            }
+                        }
                     }
                 }
-                flush()
-                status = "Задача продолжена и завершена."
+                status = "Задача завершена."
             } catch (error: CancellationException) {
-                withContext(Dispatchers.NonCancellable) { flush() }
-                status = "Продолжение задачи остановлено. Прогресс сохранён."
-                title = "Задача приостановлена"
-                notification = "Прогресс сохранён. Можно продолжить из меню."
+                notificationTitle = "Задача приостановлена"
+                notificationMessage = "Сохранённые результаты шагов доступны в истории задач."
                 throw error
             } catch (error: Exception) {
-                flush()
-                val message = "Не удалось продолжить задачу: ${error.message ?: error.javaClass.simpleName}"
-                val index = messages.lastIndex
-                if (index >= 0) messages[index] = messages[index].copy(text = message)
+                val message = "Ошибка продолжения: ${error.message ?: error.javaClass.simpleName}"
+                withContext(Dispatchers.Main) {
+                    val index = messages.lastIndex
+                    if (index >= 0) messages[index] = messages[index].copy(text = message)
+                }
                 status = message
-                title = "Ошибка продолжения задачи"
-                notification = message
+                notificationTitle = "Ошибка задачи"
+                notificationMessage = error.message ?: error.javaClass.simpleName
             } finally {
-                busy = false
-                BackgroundGenerationController.currentJob = null
+                withContext(Dispatchers.Main) {
+                    busy = false
+                    refreshAgentTaskHistory()
+                }
                 appContext.startService(
                     Intent(appContext, GenerationForegroundService::class.java)
                         .setAction(GenerationForegroundService.ACTION_COMPLETE)
-                        .putExtra(GenerationForegroundService.EXTRA_TITLE, title)
-                        .putExtra(GenerationForegroundService.EXTRA_MESSAGE, notification)
+                        .putExtra(GenerationForegroundService.EXTRA_TITLE, notificationTitle)
+                        .putExtra(GenerationForegroundService.EXTRA_MESSAGE, notificationMessage)
                 )
-                val history = withContext(NonCancellable + Dispatchers.IO) {
-                    AgentTaskStore.get(appContext).listHistory()
-                }
-                agentTaskHistory = history
-                resumableAgentPlans = history.filter { it.canResume }
+                BackgroundGenerationController.currentJob = null
             }
         }
-        BackgroundGenerationController.currentJob = job
+        BackgroundGenerationController.currentJob = resumeJob
     }
 
     fun sendMessage() {
-        val userText = input.trim()
-        if ((userText.isEmpty() && attachments.isEmpty()) || busy) return
+        val rawUserText = input.trim()
+        val userText = rawUserText.take(runtimeConfig.maxPromptCharacters)
+        val promptWasTruncated = rawUserText.length > userText.length
+        val cloudOnlyReady = mode == AgentMode.HYBRID &&
+            geminiKeyConfigured && runtimeConfig.geminiApiEnabled
+        if ((userText.isEmpty() && attachments.isEmpty()) ||
+            (!(engine != null && modelReady) && !cloudOnlyReady) || busy
+        ) return
 
         val attached = attachments.toList()
-        val cloudOnlyTextAllowed = attached.isEmpty() &&
-            mode == AgentMode.HYBRID && geminiKeyConfigured
-        if (!modelReady && !cloudOnlyTextAllowed) {
-            status = if (attached.isNotEmpty()) {
-                "Для обработки вложений нужна загруженная локальная модель."
-            } else {
-                "Загрузите локальную модель или настройте Gemini и включите гибридный режим."
-            }
-            return
-        }
         val prompt = buildString {
             append(userText)
             if (attached.isNotEmpty()) {
                 if (isNotEmpty()) appendLine()
                 appendLine("Пользователь добавил вложения:")
                 attached.forEach { appendLine("- ${it.type}: ${it.name}") }
-                append("Поддерживаемые текстовые файлы, исходники, DOCX, XLSX, PPTX и PDF обрабатываются локально; сканированным PDF нужен OCR. Фото анализируются локальной vision-моделью, а из видео извлекается до четырёх кадров. Вложения не отправляются в облако.")
+                append("Текстовые файлы, DOCX, XLSX, PPTX и PDF читаются локально, если формат поддерживается. Фото и видео автоматически направляются локальному Vision-анализатору; координатор затем выбирает языковую модель для итогового ответа.")
             }
             // Qwen3 supports /no_think to skip the hidden reasoning channel
             // and produce a user-facing answer within the generation token budget.
@@ -833,32 +984,21 @@ fun MainScreen() {
         attachments.clear()
         messages.add(ChatMessage("Вы", visibleText))
         messages.add(ChatMessage("MOBILE AI", ""))
+        while (messages.size > runtimeConfig.maxHistoryMessages) messages.removeAt(0)
         busy = true
-        status = "Подготовка ответа…"
+        status = "Модель генерирует ответ…" +
+            if (promptWasTruncated) " Текст ограничен лимитом runtime-конфигурации (${runtimeConfig.maxPromptCharacters} символов)." else ""
 
         val activeEngine = engine
-        val coordinator = AgentCoordinator.forContext(appContext, activeEngine)
         val route = coordinator.route(
             prompt,
-            hybridMode = mode == AgentMode.HYBRID && attached.isEmpty()
+            hybridMode = mode == AgentMode.HYBRID && attached.isEmpty(),
+            routing = runtimeConfig.routing
         )
-        status = route.warning ?: route.reason
-        if (route.provider == AgentProviderKind.BLOCKED) {
-            val message = route.warning ?: route.reason
-            val index = messages.lastIndex
-            if (index >= 0 && messages[index].speaker == "MOBILE AI") {
-                messages[index] = messages[index].copy(text = message)
-            }
-            attached.forEach { attachment ->
-                attachment.bitmap?.let { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
-            }
-            busy = false
-            status = message
-            return
-        }
-        if (route.provider == AgentProviderKind.LOCAL && !modelReady) {
-            val message = route.warning
-                ?: "Для этой задачи нужна загруженная локальная модель. В гибридном режиме Gemini обрабатывает обычный текст, код и сложный анализ; файлы и изображения требуют локального движка."
+        status = (route.warning ?: route.reason) +
+            if (promptWasTruncated) " Текст запроса сокращён до ${runtimeConfig.maxPromptCharacters} символов." else ""
+        if (route.provider == AgentProviderKind.LOCAL && activeEngine == null) {
+            val message = "Локальный движок не инициализирован. Запросы без вложений доступны через Gemini в гибридном режиме при настроенном API-ключе; обработка вложений требует локального движка."
             val index = messages.lastIndex
             if (index >= 0 && messages[index].speaker == "MOBILE AI") {
                 messages[index] = messages[index].copy(text = message)
@@ -905,7 +1045,14 @@ fun MainScreen() {
             try {
                 val textFileUris = attached.filter { it.type == "Файл" }.mapNotNull { it.uri }
                 val effectivePrompt = withContext(Dispatchers.IO) {
-                    SafeDocumentReader.appendSelectedFiles(prompt, appContext.contentResolver, textFileUris)
+                    val withDocuments = if (runtimeConfig.documentReadingEnabled) {
+                        SafeDocumentReader.appendSelectedFiles(prompt, appContext.contentResolver, textFileUris)
+                    } else if (textFileUris.isNotEmpty()) {
+                        prompt + "\n\nЧтение документов отключено в runtime-настройках. Содержимое файлов не прочитано."
+                    } else prompt
+                    if (!runtimeConfig.videoFrameExtractionEnabled && attached.any { it.type == "Видео" }) {
+                        withDocuments + "\n\nИзвлечение кадров видео отключено в runtime-настройках. Содержимое видео недоступно."
+                    } else withDocuments
                 }
                 val imageSources = attached.filter { it.type == "Фото" }.mapNotNull { attachment ->
                     when {
@@ -914,65 +1061,161 @@ fun MainScreen() {
                         else -> null
                     }
                 }
-                val videoAttachments = attached.filter { it.type == "Видео" && it.uri != null }
-                val hasVisualAttachments = imageSources.isNotEmpty() || videoAttachments.isNotEmpty()
-                val visionEngine = activeEngine as? VisionInferenceEngine
-                val visionReady = hasVisualAttachments && visionEngine?.isVisionReady() == true
+                val hasVideoAttachment = attached.any { it.type == "Видео" }
+                val hasVisualAttachments = imageSources.isNotEmpty() || hasVideoAttachment
+                if (hasVisualAttachments) {
+                    check(runtimeConfig.visionInferenceEnabled) {
+                        "Vision-модуль отключён в настройках. Включите его, чтобы анализировать фото и видео."
+                    }
+                    if (hasVideoAttachment) {
+                        check(runtimeConfig.videoFrameExtractionEnabled) {
+                            "Извлечение кадров видео отключено в настройках."
+                        }
+                    }
+                    val visionEngine = activeEngine as? VisionInferenceEngine
+                        ?: error("Текущая нативная сборка не поддерживает Vision-модель.")
+                    val modelPreferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+                    val currentlySelected = modelPreferences.getString("model_path", null)?.let { File(it) }
+                    val textModelFile = currentlySelected?.takeIf {
+                        it.isFile && it.canRead() && !it.name.contains("SmolVLM", ignoreCase = true)
+                    } ?: qwenModelFile.takeIf { it.isFile && it.canRead() }
+                    check(textModelFile != null) {
+                        "Не найдена локальная языковая модель для возврата после Vision-анализа. Сначала выберите Qwen."
+                    }
 
-                if (visionReady && visionEngine != null) {
-                    status = if (videoAttachments.isNotEmpty()) "Извлечение кадров видео и подготовка изображений…"
-                        else "Подготовка изображений для локального анализа…"
+                    val visionAlreadyReady = visionEngine.isVisionReady()
+                    var visionModelActivated = false
+                    var stagedImages: com.mikhaildezprofi.mobileaiagent.StagedImageFiles? = null
                     val extractedVideoFrames = mutableListOf<ImageAttachmentSource>()
+                    val visionSummary = StringBuilder()
                     try {
-                        var remainingFrames = (4 - imageSources.size).coerceAtLeast(0)
-                        for (video in videoAttachments) {
+                        if (!visionAlreadyReady) {
+                            visionDownloadBusy = true
+                            visionDownloadProgress = 0f
+                            visionDownloadStatus = "Автоматическая подготовка Vision-модели…"
+                            status = "Координатор подключает Vision-модель для фото/видео…"
+                            val assets = VisionModelAssets.download(appContext) { progress ->
+                                withContext(Dispatchers.Main) {
+                                    visionDownloadProgress = progress.fraction
+                                    val currentMb = progress.fileBytes / (1024L * 1024L)
+                                    val totalMb = progress.fileTotalBytes / (1024L * 1024L)
+                                    val overallMb = progress.completedBytes / (1024L * 1024L)
+                                    val overallTotalMb = progress.totalBytes / (1024L * 1024L)
+                                    visionDownloadStatus =
+                                        "${progress.fileName}: $currentMb / $totalMb МБ • всего $overallMb / $overallTotalMb МБ"
+                                }
+                            }
+                            visionDownloadStatus = "Файлы Vision проверены. Переключаю движок…"
+                            visionModelActivated = true
+                            activateModelFileNow(assets.model, assets.projector)
+                            visionDownloadStatus = "Vision-модель автоматически загружена."
+                        } else {
+                            val selectedIsVision = currentlySelected?.name?.contains("SmolVLM", ignoreCase = true) == true
+                            visionModelActivated = selectedIsVision
+                        }
+
+                        status = if (hasVideoAttachment) {
+                            "Извлечение ключевых кадров видео и анализ…"
+                        } else {
+                            "Локальный анализ фото…"
+                        }
+                        val selectedImageSources = imageSources.take(if (hasVideoAttachment) 3 else 4)
+                        var remainingFrames = (4 - selectedImageSources.size).coerceAtLeast(0)
+                        for (video in attached.filter { it.type == "Видео" && it.uri != null }) {
                             if (remainingFrames <= 0) break
-                            val uri = video.uri ?: continue
                             val frames = withContext(Dispatchers.IO) {
-                                VideoFrameExtractor.extractFrames(appContext, uri, video.name, remainingFrames)
+                                VideoFrameExtractor.extractFrames(
+                                    appContext, video.uri!!, video.name, remainingFrames
+                                )
                             }
                             extractedVideoFrames += frames
                             remainingFrames -= frames.size
                         }
-                        val visualSources = imageSources + extractedVideoFrames
-                        if (visualSources.isEmpty()) error("Не удалось подготовить изображения или кадры видео.")
-                        val videoNote = if (videoAttachments.isNotEmpty()) {
-                            "\n\nК видео извлечено ${extractedVideoFrames.size} ключевых кадров. Анализ основан на этих кадрах, а не на каждом мгновении ролика."
+                        val visualSources = selectedImageSources + extractedVideoFrames
+                        check(visualSources.isNotEmpty()) {
+                            "Не удалось получить изображения или кадры из выбранного видео."
+                        }
+                        val videoNote = if (hasVideoAttachment) {
+                            "\n\nВидео представлено ${extractedVideoFrames.size} ключевыми кадрами. Не делай выводов о промежутках между кадрами."
                         } else ""
-                        val stagedImages = ImageAttachmentStager.stage(appContext, visualSources)
-                        try {
-                            withContext(Dispatchers.IO) {
-                                visionEngine.sendUserPromptWithImages(
-                                    message = effectivePrompt + videoNote,
-                                    imagePaths = stagedImages.files.map { it.absolutePath },
-                                    predictLength = 1024
-                                ).collect { token ->
-                                    pendingTokens.append(token)
-                                    val now = SystemClock.elapsedRealtime()
-                                    if (now - lastUiFlush >= 100L) {
-                                        flushPendingTokens()
-                                        lastUiFlush = now
-                                    }
-                                }
-                            }
-                        } finally {
-                            stagedImages.close()
+                        val omittedImages = imageSources.size - selectedImageSources.size
+                        val imageLimitNote = if (omittedImages > 0) {
+                            "\n\nДля одного запроса выбраны первые ${selectedImageSources.size} фото; ещё $omittedImages фото пропущено из-за лимита обработки."
+                        } else ""
+                        stagedImages = ImageAttachmentStager.stage(appContext, visualSources)
+                        withContext(Dispatchers.IO) {
+                            visionEngine.sendUserPromptWithImages(
+                                message = effectivePrompt + imageLimitNote + videoNote,
+                                imagePaths = stagedImages!!.files.map { it.absolutePath },
+                                predictLength = minOf(
+                                    1024, runtimeConfig.maxOutputTokens, runtimeConfig.routing.localMaxTokens
+                                )
+                            ).collect { token -> visionSummary.append(token) }
+                        }
+                        check(visionSummary.isNotBlank()) {
+                            "Vision-модель не вернула описание содержимого."
                         }
                     } finally {
+                        stagedImages?.close()
                         extractedVideoFrames.forEach { source ->
-                            source.bitmap?.let { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
+                            source.bitmap?.let { bitmap ->
+                                if (!bitmap.isRecycled) bitmap.recycle()
+                            }
+                        }
+                        if (visionModelActivated) {
+                            status = "Vision-анализ завершён. Возвращаю локальную языковую модель…"
+                            try {
+                                activateModelFileNow(textModelFile!!, null)
+                            } catch (restoreError: Exception) {
+                                throw IllegalStateException(
+                                    "Vision-анализ выполнен, но не удалось вернуть языковую модель ${textModelFile!!.name}: ${restoreError.message}",
+                                    restoreError
+                                )
+                            }
+                        }
+                        visionDownloadBusy = false
+                    }
+
+                    // Original photo/video files stay on-device. Only the text summary
+                    // produced by the local Vision model can be routed to the cloud.
+                    val languagePrompt = buildString {
+                        appendLine("Запрос пользователя:")
+                        appendLine(userText.ifBlank { "Проанализируй приложенные визуальные материалы." })
+                        appendLine()
+                        appendLine("Результат локального анализа визуальных данных:")
+                        appendLine(visionSummary.toString().trim())
+                        appendLine()
+                        append("Подготовь точный ответ на запрос пользователя. Не утверждай, что видел детали, которых нет в описании.")
+                    }
+                    status = "Vision-анализ готов. Координатор выбирает языковую модель…"
+                    withContext(Dispatchers.IO) {
+                        coordinator.generate(
+                            prompt = languagePrompt,
+                            maxTokens = runtimeConfig.maxOutputTokens,
+                            hybridMode = mode == AgentMode.HYBRID && textFileUris.isEmpty(),
+                            routing = runtimeConfig.routing,
+                            systemPrompt = systemPrompt,
+                            temperature = runtimeConfig.temperature,
+                            taskOverride = AgentTaskKind.GENERAL
+                        ).collect { token ->
+                            pendingTokens.append(token)
+                            val now = SystemClock.elapsedRealtime()
+                            if (now - lastUiFlush >= 100L) {
+                                flushPendingTokens()
+                                lastUiFlush = now
+                            }
                         }
                     }
                 } else {
-                    val safePrompt = if (hasVisualAttachments) {
-                        effectivePrompt + "\n\nСистемное ограничение: приложены фото или видео, но совместимая vision-модель и mmproj не загружены. Не делай вид, что видел изображения или видео; честно сообщи, что их содержимое сейчас недоступно."
-                    } else effectivePrompt
                     withContext(Dispatchers.IO) {
                         coordinator.generateWithPlanning(
-                            prompt = safePrompt,
-                            maxTokens = 4096,
-                            // File contents remain on-device until an explicit cloud-file policy exists.
-                            hybridMode = mode == AgentMode.HYBRID && attached.isEmpty()
+                            prompt = effectivePrompt,
+                            maxTokens = runtimeConfig.maxOutputTokens,
+                            // Documents and other attachments stay local unless a separate policy is added.
+                            hybridMode = mode == AgentMode.HYBRID && attached.isEmpty(),
+                            routing = runtimeConfig.routing,
+                            systemPrompt = systemPrompt,
+                            temperature = runtimeConfig.temperature
                         ).collect { token ->
                             pendingTokens.append(token)
                             val now = SystemClock.elapsedRealtime()
@@ -1058,34 +1301,12 @@ fun MainScreen() {
                         scope.launch { drawerState.close() }
                     }
                 )
-                resumableAgentPlans.forEach { savedPlan ->
-                    val completedCount = savedPlan.steps.count {
-                        it.status == com.mikhaildezprofi.mobileaiagent.AgentStepStatus.COMPLETED
-                    }
-                    NavigationDrawerItem(
-                        label = {
-                            Column {
-                                Text("Продолжить: ${savedPlan.plan.title}", maxLines = 1)
-                                Text(
-                                    "Готово ${completedCount}/${savedPlan.steps.size} шагов",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-                        },
-                        selected = false,
-                        icon = { Icon(Icons.Default.Memory, contentDescription = null) },
-                        enabled = !busy,
-                        onClick = {
-                            scope.launch { drawerState.close() }
-                            resumeSavedAgentPlan(savedPlan)
-                        }
-                    )
-                }
                 NavigationDrawerItem(
                     label = { Text("История задач") },
                     selected = false,
-                    icon = { Icon(Icons.Default.Memory, contentDescription = null) },
+                    icon = { Icon(Icons.Default.History, contentDescription = null) },
                     onClick = {
+                        refreshAgentTaskHistory()
                         showTaskHistoryDialog = true
                         scope.launch { drawerState.close() }
                     }
@@ -1115,7 +1336,41 @@ fun MainScreen() {
                     onClick = {
                         promptDraft = systemPrompt
                         configDraft = runtimeConfig
+                        selectedPromptProfileId = runtimeConfig.selectedPromptProfileId
+                        selectedResponseProfileId = runtimeConfig.selectedResponseProfileId
                         showSettingsDialog = true
+                        scope.launch { drawerState.close() }
+                    }
+                )
+                NavigationDrawerItem(
+                    label = { Text("Экспорт резервной копии") },
+                    selected = false,
+                    icon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                    onClick = {
+                        if (!busy) {
+                            if (messages.isNotEmpty()) {
+                                val title = messages.firstOrNull { it.speaker == "Вы" }?.text
+                                    ?.replace("\n", " ")?.take(42)?.ifBlank { "Новый чат" } ?: "Новый чат"
+                                val active = SavedChat(currentChatId, title, messages.toList(), System.currentTimeMillis())
+                                val snapshot = (listOf(active) + chatHistory.filterNot { it.id == currentChatId }).take(50)
+                                chatHistory.clear()
+                                chatHistory.addAll(snapshot)
+                                saveSavedChats(appContext, snapshot)
+                            }
+                            backupExportLauncher.launch("MOBILE_AI_AGENT_backup.json")
+                        } else {
+                            status = "Дождитесь завершения генерации перед экспортом."
+                        }
+                        scope.launch { drawerState.close() }
+                    }
+                )
+                NavigationDrawerItem(
+                    label = { Text("Восстановить резервную копию") },
+                    selected = false,
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                    onClick = {
+                        if (!busy) backupImportLauncher.launch(arrayOf("application/json", "text/json", "*/*"))
+                        else status = "Дождитесь завершения генерации перед восстановлением."
                         scope.launch { drawerState.close() }
                     }
                 )
@@ -1144,7 +1399,7 @@ fun MainScreen() {
                         onClick = {
                             if (!busy) {
                                 messages.clear()
-                                messages.addAll(savedChat.messages)
+                                messages.addAll(savedChat.messages.takeLast(runtimeConfig.maxHistoryMessages))
                                 currentChatId = savedChat.id
                                 input = ""
                                 attachments.clear()
@@ -1246,13 +1501,12 @@ fun MainScreen() {
                             ComposerInput(
                                 value = input,
                                 onValueChange = { input = it },
-                                placeholder = if (messages.isEmpty()) "Спросить AI" else "Ответить AI",
+                                placeholder = if (messages.isEmpty()) runtimeConfig.placeholderNewChat else runtimeConfig.placeholderReply,
                                 maxHeight = (maxHeight - 8.dp).coerceAtLeast(96.dp),
                                 attachmentsEnabled = runtimeConfig.attachmentsEnabled,
                                 voiceEnabled = runtimeConfig.voiceEnabled,
-                                canSend = !busy && (input.isNotBlank() || attachments.isNotEmpty()) &&
-                                    (if (attachments.isNotEmpty()) modelReady
-                                    else modelReady || (mode == AgentMode.HYBRID && geminiKeyConfigured)),
+                                canSend = (modelReady || (mode == AgentMode.HYBRID && geminiKeyConfigured && runtimeConfig.geminiApiEnabled)) &&
+                                    !busy && (input.isNotBlank() || attachments.isNotEmpty()),
                                 onAdd = { showPlusMenu = true },
                                 addMenu = { AttachmentMenu(showPlusMenu, { showPlusMenu = false }, runtimeConfig.cameraEnabled, filePicker, imagePicker, videoPicker, cameraLauncher) },
                                 onExpand = { inputFullscreen = true },
@@ -1283,9 +1537,9 @@ fun MainScreen() {
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        if (modelReady) "Напишите сообщение или задайте вопрос голосом."
-                        else if (mode == AgentMode.HYBRID && geminiKeyConfigured) "Текстовые запросы доступны через Gemini. Для файлов и изображений нужна локальная модель."
-                        else "Откройте меню и загрузите GGUF-модель или настройте Gemini в гибридном режиме.",
+                        if (modelReady) "Координатор автоматически выбирает локальную, Vision или облачную модель."
+                        else if (mode == AgentMode.HYBRID && geminiKeyConfigured && runtimeConfig.geminiApiEnabled) "Облачный режим готов. Для локальной и Vision-обработки загрузите Qwen."
+                        else "Откройте меню и настройте модель или Gemini API.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -1363,6 +1617,45 @@ fun MainScreen() {
         }
     }
 
+    if (showCapabilitiesDialog) {
+        val capabilities = AgentToolRegistry.forRuntime(
+            localReady = modelReady,
+            cloudReady = geminiKeyConfigured && runtimeConfig.geminiApiEnabled,
+            fileReaderReady = runtimeConfig.documentReadingEnabled,
+            visionReady = visionReady && runtimeConfig.visionInferenceEnabled
+        ).all()
+        AlertDialog(
+            onDismissRequest = { showCapabilitiesDialog = false },
+            title = { Text("Возможности ИИ") },
+            text = {
+                Column(
+                    modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("Список показывает только реально подключённые функции. Наличие API-ключа не означает, что облачный запрос уже проверен.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "Пока не подключены: веб-поиск, управление Android, пробуждение по слову «Джимми» и синтез речи. Удалённые флаги не включают отсутствующий код.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    capabilities.forEach { capability ->
+                        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(if (capability.available) "●" else "○", color = if (capability.available) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(capability.title, fontWeight = FontWeight.SemiBold)
+                                Text(if (capability.available) "Доступно" else "Не подключено", style = MaterialTheme.typography.labelSmall, color = if (capability.available) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(capability.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCapabilitiesDialog = false }) { Text("Закрыть") }
+            }
+        )
+    }
+
     if (showTaskHistoryDialog) {
         AlertDialog(
             onDismissRequest = { showTaskHistoryDialog = false },
@@ -1417,7 +1710,7 @@ fun MainScreen() {
                 ) {
                     Text("${taskPlanStatusLabel(saved.status)} · $done/${saved.steps.size} шагов")
                     Text("Исходная задача", fontWeight = FontWeight.SemiBold)
-                    Text(saved.plan.originalPrompt, style = MaterialTheme.typography.bodySmall)
+                    SelectionContainer { Text(saved.plan.originalPrompt, style = MaterialTheme.typography.bodySmall) }
                     HorizontalDivider()
                     saved.steps.forEachIndexed { index, step ->
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -1458,9 +1751,7 @@ fun MainScreen() {
                     planPendingDeletion = null
                     scope.launch {
                         withContext(Dispatchers.IO) { AgentTaskStore.get(appContext).deletePlan(id) }
-                        val history = withContext(Dispatchers.IO) { AgentTaskStore.get(appContext).listHistory() }
-                        agentTaskHistory = history
-                        resumableAgentPlans = history.filter { it.canResume }
+                        refreshAgentTaskHistory()
                     }
                 }) { Text("Удалить") }
             },
@@ -1470,48 +1761,36 @@ fun MainScreen() {
         )
     }
 
-    if (showCapabilitiesDialog) {
-        val capabilities = AgentToolRegistry.forRuntime(
-            localReady = modelReady,
-            cloudReady = geminiKeyConfigured,
-            fileReaderReady = true,
-            visionReady = visionReady
-        ).all()
-        AlertDialog(
-            onDismissRequest = { showCapabilitiesDialog = false },
-            title = { Text("Возможности ИИ") },
-            text = {
-                Column(
-                    modifier = Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("Список показывает только реально подключённые функции. Наличие API-ключа не означает, что облачный запрос уже проверен.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    capabilities.forEach { capability ->
-                        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(if (capability.available) "●" else "○", color = if (capability.available) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(capability.title, fontWeight = FontWeight.SemiBold)
-                                Text(if (capability.available) "Доступно" else "Не подключено", style = MaterialTheme.typography.labelSmall, color = if (capability.available) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(capability.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showCapabilitiesDialog = false }) { Text("Закрыть") }
-            }
-        )
-    }
-
     if (showModelDialog) {
         AlertDialog(
             onDismissRequest = { showModelDialog = false },
             title = { Text("Модель и режим") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Text(status)
-                    Text(if (modelReady) "Локальная модель загружена" else "Модель не загружена")
+                    Text(
+                        when {
+                            visionReady -> "Активна SmolVLM: локальный анализ изображений доступен."
+                            modelReady -> "Локальная текстовая модель загружена."
+                            else -> "Локальная модель не загружена."
+                        }
+                    )
+                    HorizontalDivider()
+                    Text("Vision-модель для фото и кадров видео", fontWeight = FontWeight.SemiBold)
+                    Text("SmolVLM 500M Q8_0 • 436,8 МБ + проектор 108,8 МБ. Файлы хранятся отдельно от Qwen; одновременно загружается только одна модель.")
+                    if (visionDownloadBusy) {
+                        LinearProgressIndicator(progress = visionDownloadProgress, modifier = Modifier.fillMaxWidth())
+                    }
+                    Text(visionDownloadStatus, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "Ручное переключение не требуется. При первом фото или видео координатор сам скачает и проверит SmolVLM, временно загрузит её, выполнит анализ и вернёт языковую модель. Исходные медиа остаются на телефоне; в гибридном режиме в облако может уйти только текстовое резюме локального анализа.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    HorizontalDivider()
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Локальный режим")
                         Spacer(Modifier.weight(1f))
@@ -1519,6 +1798,7 @@ fun MainScreen() {
                             checked = mode == AgentMode.HYBRID,
                             onCheckedChange = {
                                 mode = if (it) AgentMode.HYBRID else AgentMode.LOCAL
+                                RuntimeFiles.saveMode(appContext, mode == AgentMode.HYBRID)
                             }
                         )
                         Text("Гибридный")
@@ -1577,6 +1857,7 @@ fun MainScreen() {
                                         withContext(Dispatchers.IO) { geminiKeyStore.save(keyToSave) }
                                         geminiApiKeyDraft = ""
                                         geminiKeyConfigured = true
+                                        geminiTestStatus = ""
                                         geminiKeyStatus = "Ключ сохранён в Android Keystore."
                                         status = "Gemini API-ключ сохранён."
                                     } catch (error: Exception) {
@@ -1586,12 +1867,13 @@ fun MainScreen() {
                             }
                         ) { Text("Сохранить ключ") }
                         TextButton(
-                            enabled = geminiKeyConfigured,
+                            enabled = geminiKeyConfigured && !geminiTestBusy,
                             onClick = {
                                 scope.launch {
                                     withContext(Dispatchers.IO) { geminiKeyStore.clear() }
                                     geminiApiKeyDraft = ""
                                     geminiKeyConfigured = false
+                                    geminiTestStatus = ""
                                     geminiKeyStatus = "Ключ удалён с устройства."
                                     status = "Gemini API-ключ удалён."
                                 }
@@ -1599,7 +1881,33 @@ fun MainScreen() {
                         ) { Text("Удалить ключ") }
                     }
                     Text(geminiKeyStatus, style = MaterialTheme.typography.bodySmall)
-                    Text("Gemini 3.5 Flash-Lite • бесплатный уровень при наличии квоты Google")
+                    TextButton(
+                        enabled = geminiKeyConfigured && !geminiTestBusy,
+                        onClick = {
+                            geminiTestBusy = true
+                            geminiTestStatus = "Проверка ключа и доступности модели…"
+                            scope.launch {
+                                try {
+                                    geminiTestStatus = GeminiCloudProvider(
+                                        geminiKeyStore,
+                                        model = runtimeConfig.geminiModelId,
+                                        connectTimeoutMs = runtimeConfig.networkConnectTimeoutSeconds * 1000,
+                                        readTimeoutMs = runtimeConfig.networkReadTimeoutSeconds * 1000
+                                    ).testConnection()
+                                } catch (error: Exception) {
+                                    geminiTestStatus = "Проверка не пройдена: ${error.message ?: error.javaClass.simpleName}"
+                                } finally {
+                                    geminiTestBusy = false
+                                }
+                            }
+                        }
+                    ) {
+                        Text(if (geminiTestBusy) "Проверяем…" else "Проверить подключение Gemini")
+                    }
+                    if (geminiTestStatus.isNotBlank()) {
+                        Text(geminiTestStatus, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("${runtimeConfig.geminiModelId} • бесплатный уровень при наличии квоты Google")
                     HorizontalDivider()
                     Text("Установленное приложение Gemini", fontWeight = FontWeight.SemiBold)
                     Text(
@@ -1647,6 +1955,60 @@ fun MainScreen() {
                         Text(geminiAppStatus, style = MaterialTheme.typography.bodySmall)
                     }
                     HorizontalDivider()
+                    Text("Профиль помощника", fontWeight = FontWeight.SemiBold)
+                    Box {
+                        TextButton(onClick = { promptProfileMenuExpanded = true }) {
+                            Text(configDraft.promptProfiles.firstOrNull { it.id == selectedPromptProfileId }?.label
+                                ?: selectedPromptProfileId)
+                        }
+                        DropdownMenu(
+                            expanded = promptProfileMenuExpanded,
+                            onDismissRequest = { promptProfileMenuExpanded = false }
+                        ) {
+                            configDraft.promptProfiles.forEach { profile ->
+                                DropdownMenuItem(
+                                    text = { Text(profile.label) },
+                                    onClick = {
+                                        selectedPromptProfileId = profile.id
+                                        configDraft = configDraft.copy(selectedPromptProfileId = profile.id)
+                                        promptDraft = profile.content
+                                        promptProfileMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Text("Формат ответа", fontWeight = FontWeight.SemiBold)
+                    Box {
+                        TextButton(onClick = { responseProfileMenuExpanded = true }) {
+                            Text(configDraft.responseProfiles.firstOrNull { it.id == selectedResponseProfileId }?.label
+                                ?: selectedResponseProfileId)
+                        }
+                        DropdownMenu(
+                            expanded = responseProfileMenuExpanded,
+                            onDismissRequest = { responseProfileMenuExpanded = false }
+                        ) {
+                            configDraft.responseProfiles.forEach { profile ->
+                                DropdownMenuItem(
+                                    text = { Text(profile.label) },
+                                    onClick = {
+                                        selectedResponseProfileId = profile.id
+                                        configDraft = configDraft.copy(
+                                            selectedResponseProfileId = profile.id,
+                                            maxOutputTokens = profile.maxOutputTokens,
+                                            temperature = profile.temperature
+                                        )
+                                        responseProfileMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        "Лимит ответа: ${configDraft.maxOutputTokens} токенов • temperature: ${configDraft.temperature}. Температура применяется к Gemini; локальный Qwen использует параметры native engine.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Text("Системный промпт")
                     OutlinedTextField(
                         value = promptDraft,
@@ -1656,6 +2018,39 @@ fun MainScreen() {
                         maxLines = 5
                     )
                     Text("Встроенные модули")
+                    Text(
+                        "Недоступные в этой сборке функции нельзя активировать одной настройкой: веб-поиск, Android-действия, wake word и TTS остаются выключены.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = configDraft.documentReadingEnabled,
+                            onCheckedChange = { configDraft = configDraft.copy(documentReadingEnabled = it) }
+                        )
+                        Text("Чтение документов")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = configDraft.videoFrameExtractionEnabled,
+                            onCheckedChange = { configDraft = configDraft.copy(videoFrameExtractionEnabled = it) }
+                        )
+                        Text("Извлечение кадров видео")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = configDraft.visionInferenceEnabled,
+                            onCheckedChange = { configDraft = configDraft.copy(visionInferenceEnabled = it) }
+                        )
+                        Text("Локальный анализ изображений")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = configDraft.geminiApiEnabled,
+                            onCheckedChange = { configDraft = configDraft.copy(geminiApiEnabled = it) }
+                        )
+                        Text("Gemini API")
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
                             checked = configDraft.attachmentsEnabled,
@@ -1686,10 +2081,59 @@ fun MainScreen() {
                     }
                     TextButton(
                         onClick = {
+                            RuntimeFiles.clearModuleOverrides(appContext)
                             val loaded = RuntimeFiles.load(appContext)
                             runtimeFiles = loaded
                             runtimeConfig = loaded.config
                             configDraft = loaded.config
+                            selectedPromptProfileId = loaded.config.selectedPromptProfileId
+                            selectedResponseProfileId = loaded.config.selectedResponseProfileId
+                            status = "Локальные переопределения модулей сброшены. Применены значения из runtime JSON."
+                        }
+                    ) { Text("Сбросить локальные переопределения модулей") }
+                    TextButton(
+                        enabled = !runtimeUpdateInProgress,
+                        onClick = {
+                            runtimeUpdateInProgress = true
+                            scope.launch {
+                                try {
+                                    val result = RuntimeConfigUpdater.downloadAndApply(appContext)
+                                    val loaded = RuntimeFiles.load(appContext)
+                                    runtimeFiles = loaded
+                                    runtimeConfig = loaded.config
+                                    configDraft = loaded.config
+                                    selectedPromptProfileId = loaded.config.selectedPromptProfileId
+                                    selectedResponseProfileId = loaded.config.selectedResponseProfileId
+                                    if (!loaded.customPrompt) {
+                                        systemPrompt = loaded.systemPrompt
+                                        promptDraft = loaded.systemPrompt
+                                        engine?.let { active ->
+                                            withContext(Dispatchers.IO) {
+                                                if (modelReady) active.setSystemPrompt(loaded.systemPrompt)
+                                            }
+                                        }
+                                    }
+                                    status = "Конфигурация ${result.version} проверена SHA-256 и загружена (${result.downloadedFiles} файлов)." +
+                                        if (loaded.customPrompt) " Пользовательский промпт сохранён."
+                                        else " Профиль ${loaded.config.selectedPromptProfileId} активен."
+                                } catch (error: Exception) {
+                                    status = "Обновление конфигурации не выполнено: ${error.message ?: error.javaClass.simpleName}"
+                                } finally {
+                                    runtimeUpdateInProgress = false
+                                }
+                            }
+                        }
+                    ) {
+                        Text(if (runtimeUpdateInProgress) "Загрузка и проверка…" else "Скачать обновления конфигурации")
+                    }
+                    TextButton(
+                        onClick = {
+                            val loaded = RuntimeFiles.load(appContext)
+                            runtimeFiles = loaded
+                            runtimeConfig = loaded.config
+                            configDraft = loaded.config
+                            selectedPromptProfileId = loaded.config.selectedPromptProfileId
+                            selectedResponseProfileId = loaded.config.selectedResponseProfileId
                             systemPrompt = loaded.systemPrompt
                             promptDraft = loaded.systemPrompt
                             engine?.let { active ->
@@ -1717,9 +2161,25 @@ fun MainScreen() {
                         val savedConfig = configDraft.copy(
                             inputMaxLines = configDraft.inputMaxLines.coerceIn(1, 3)
                         )
-                        RuntimeFiles.save(appContext, savedConfig, promptDraft)
+                        RuntimeFiles.save(
+                            appContext, savedConfig, promptDraft,
+                            selectedPromptProfileId,
+                            selectedResponseProfileId,
+                            moduleOverrides = buildSet {
+                                if (savedConfig.attachmentsEnabled != runtimeConfig.attachmentsEnabled) add("attachments")
+                                if (savedConfig.voiceEnabled != runtimeConfig.voiceEnabled) add("voiceInput")
+                                if (savedConfig.cameraEnabled != runtimeConfig.cameraEnabled) add("cameraCapture")
+                                if (savedConfig.diagnosticsEnabled != runtimeConfig.diagnosticsEnabled) add("diagnostics")
+                                if (savedConfig.videoFrameExtractionEnabled != runtimeConfig.videoFrameExtractionEnabled) add("videoFrameExtraction")
+                                if (savedConfig.documentReadingEnabled != runtimeConfig.documentReadingEnabled) add("documentReading")
+                                if (savedConfig.visionInferenceEnabled != runtimeConfig.visionInferenceEnabled) add("visionInference")
+                                if (savedConfig.geminiApiEnabled != runtimeConfig.geminiApiEnabled) add("geminiApi")
+                            }
+                        )
                         runtimeFiles = RuntimeFiles.load(appContext)
                         runtimeConfig = runtimeFiles.config
+                        selectedPromptProfileId = runtimeFiles.config.selectedPromptProfileId
+                        selectedResponseProfileId = runtimeFiles.config.selectedResponseProfileId
                         systemPrompt = runtimeFiles.systemPrompt
                         engine?.let { active ->
                             scope.launch {
@@ -1749,7 +2209,7 @@ fun MainScreen() {
             title = { Text("Диагностика") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Версия 0.2.0 • llama.cpp • GGUF • Android arm64-v8a")
+                    Text("Версия $appVersion • llama.cpp • GGUF • Android arm64-v8a")
                     Text(status)
                     Text("Производительность устройства", fontWeight = FontWeight.SemiBold)
                     SelectionContainer {
@@ -1827,7 +2287,7 @@ fun MainScreen() {
                             Box {
                                 if (input.isEmpty()) {
                                     Text(
-                                        if (messages.isEmpty()) "Спросить AI" else "Ответить AI",
+                                        if (messages.isEmpty()) runtimeConfig.placeholderNewChat else runtimeConfig.placeholderReply,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -1850,7 +2310,8 @@ fun MainScreen() {
                         ComposerButtons(
                             attachmentsEnabled = runtimeConfig.attachmentsEnabled,
                             voiceEnabled = runtimeConfig.voiceEnabled,
-                            canSend = modelReady && !busy && (input.isNotBlank() || attachments.isNotEmpty()),
+                            canSend = (modelReady || (mode == AgentMode.HYBRID && geminiKeyConfigured && runtimeConfig.geminiApiEnabled)) &&
+                                    !busy && (input.isNotBlank() || attachments.isNotEmpty()),
                             onAdd = { showPlusMenu = true },
                             addMenu = {
                                 AttachmentMenu(

@@ -1,0 +1,6 @@
+# GitLab CI is intentionally disabled.
+# GitHub Actions is the canonical mirror/sync and Android build runner.
+# The GitHub workflow polls GitLab main hourly as a fallback.
+workflow:
+  rules:
+    - when: never

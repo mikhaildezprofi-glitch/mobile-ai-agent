@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "default": "compact",
+  "profiles": [
+    { "id": "compact", "label": "Кратко", "maxOutputTokens": 512, "temperature": 0.6 },
+    { "id": "detailed", "label": "Подробно", "maxOutputTokens": 2048, "temperature": 0.6 },
+    { "id": "technical", "label": "Технически", "maxOutputTokens": 3072, "temperature": 0.3 },
+    { "id": "voice", "label": "Для озвучивания", "maxOutputTokens": 512, "temperature": 0.5 }
+  ]
+}

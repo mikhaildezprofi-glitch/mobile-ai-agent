@@ -12,8 +12,8 @@ android {
         applicationId = "com.mikhaildezprofi.mobileaiagent"
         minSdk = 33
         targetSdk = 36
-        versionCode = 20
-        versionName = "0.3.8"
+        versionCode = 23
+        versionName = "0.4.1"
     }
 
     buildTypes {
@@ -46,10 +46,6 @@ android {
     }
 
     buildFeatures { compose = true }
-
-    testOptions {
-        unitTests.isReturnDefaultValues = true
-    }
 }
 
 dependencies {

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "verboseByDefault": false,
+  "maxLogFileBytes": 2097152,
+  "maxLogFiles": 3,
+  "includePromptText": false,
+  "includeApiKeys": false,
+  "includePrivateFilePaths": false,
+  "includeAttachmentContents": false,
+  "redactAuthorizationHeaders": true
+}
