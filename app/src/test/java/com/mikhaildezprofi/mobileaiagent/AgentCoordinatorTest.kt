@@ -237,6 +237,92 @@ class AgentCoordinatorTest {
         assertTrue(capturedPrompt.contains("Напиши функцию"))
     }
 
+    @Test
+    fun resumePlanKeepsCompletedStepAndRunsOnlyPendingSteps() = runBlocking {
+        val first = AgentTaskStep(id = "first", title = "Первый", prompt = "Первый шаг")
+        val second = AgentTaskStep(
+            id = "second", title = "Второй", prompt = "Второй шаг",
+            dependsOn = listOf("first")
+        )
+        val plan = AgentTaskPlan(
+            id = "saved-plan", title = "Восстановление", originalPrompt = "Общая задача",
+            steps = listOf(first, second)
+        )
+        val store = MemoryTaskStore()
+        store.savePlan(plan)
+        store.completeStep(plan.id, first.id, "Уже сохранённый результат")
+        store.setPlanStatus(plan.id, AgentPlanStatus.PAUSED)
+
+        val prompts = mutableListOf<String>()
+        val provider = object : AgentModelProvider {
+            override val id = "local"
+            override val isAvailable = true
+            override fun generate(prompt: String, maxTokens: Int): Flow<String> = flow {
+                prompts += prompt
+                emit("Новый результат")
+            }
+        }
+
+        val events = AgentCoordinator(provider, taskStore = store)
+            .resumePlan(plan.id, 128, false).toList()
+
+        assertEquals(1, prompts.size)
+        assertTrue(prompts.single().contains("Уже сохранённый результат"))
+        assertTrue(events.last() is AgentTaskEvent.PlanCompleted)
+        assertEquals(AgentPlanStatus.COMPLETED, store.loadPlan(plan.id)?.status)
+        assertEquals(AgentStepStatus.COMPLETED, store.loadPlan(plan.id)?.steps?.last()?.status)
+    }
+
+    private class MemoryTaskStore : AgentTaskPersistence {
+        private val records = linkedMapOf<String, SavedAgentPlan>()
+
+        override fun savePlan(plan: AgentTaskPlan) {
+            if (plan.id !in records) {
+                records[plan.id] = SavedAgentPlan(
+                    plan, AgentPlanStatus.QUEUED,
+                    plan.steps.map { SavedAgentStep(it, AgentStepStatus.PENDING) },
+                    System.currentTimeMillis()
+                )
+            } else {
+                setPlanStatus(plan.id, AgentPlanStatus.RUNNING)
+            }
+        }
+
+        override fun setPlanStatus(planId: String, status: AgentPlanStatus) {
+            val current = records.getValue(planId)
+            records[planId] = current.copy(status = status, updatedAt = System.currentTimeMillis())
+        }
+
+        override fun setStepStatus(
+            planId: String, stepId: String, status: AgentStepStatus, error: String?
+        ) {
+            val current = records.getValue(planId)
+            records[planId] = current.copy(
+                steps = current.steps.map {
+                    if (it.step.id == stepId) it.copy(status = status, error = error) else it
+                },
+                updatedAt = System.currentTimeMillis()
+            )
+        }
+
+        override fun completeStep(planId: String, stepId: String, result: String) {
+            val current = records.getValue(planId)
+            records[planId] = current.copy(
+                steps = current.steps.map {
+                    if (it.step.id == stepId) it.copy(
+                        status = AgentStepStatus.COMPLETED, result = result, error = null
+                    ) else it
+                },
+                updatedAt = System.currentTimeMillis()
+            )
+        }
+
+        override fun loadPlan(planId: String): SavedAgentPlan? = records[planId]
+
+        override fun listResumable(limit: Int): List<SavedAgentPlan> =
+            records.values.filter { it.canResume }.take(limit)
+    }
+
     private open class FakeProvider(
         override val id: String,
         override val isAvailable: Boolean,

@@ -59,6 +59,9 @@ import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.VisionInferenceEngine
 import com.mikhaildezprofi.mobileaiagent.AgentCoordinator
+import com.mikhaildezprofi.mobileaiagent.AgentTaskStore
+import com.mikhaildezprofi.mobileaiagent.SavedAgentPlan
+import com.mikhaildezprofi.mobileaiagent.AgentTaskEvent
 import com.mikhaildezprofi.mobileaiagent.AgentProviderKind
 import com.mikhaildezprofi.mobileaiagent.ImageAttachmentSource
 import com.mikhaildezprofi.mobileaiagent.ImageAttachmentStager
@@ -299,6 +302,7 @@ fun MainScreen() {
     val chatHistory = remember { mutableStateListOf<SavedChat>().apply { addAll(loadSavedChats(appContext)) } }
     var currentChatId by ChatSessionState.currentChatId
     val chatListState = rememberLazyListState()
+    var resumableAgentPlans by remember { mutableStateOf<List<SavedAgentPlan>>(emptyList()) }
 
     // Restore the most recently saved chat after Android has recreated the process.
     // Activity recreation in the same process keeps ChatSessionState and skips this path.
@@ -308,6 +312,15 @@ fun MainScreen() {
             if (latestSavedChat != null) {
                 messages.addAll(latestSavedChat.messages)
                 currentChatId = latestSavedChat.id
+            }
+        }
+    }
+
+    // Discover interrupted task plans after startup or when a generation ends.
+    LaunchedEffect(appContext, busy) {
+        if (!busy) {
+            resumableAgentPlans = withContext(Dispatchers.IO) {
+                AgentTaskStore.get(appContext).listResumable()
             }
         }
     }
@@ -676,6 +689,84 @@ fun MainScreen() {
         else status = "Доступ к микрофону не предоставлен."
     }
 
+    fun resumeSavedAgentPlan(saved: SavedAgentPlan) {
+        if (busy) return
+        val hybridMode = mode == AgentMode.HYBRID && geminiKeyConfigured
+        if (!modelReady && !hybridMode) {
+            status = "Для продолжения задачи загрузите локальную модель или настройте Gemini."
+            return
+        }
+        messages.add(ChatMessage("Вы", "Продолжить задачу: ${saved.plan.title}"))
+        messages.add(ChatMessage("MOBILE AI", ""))
+        currentChatId = System.currentTimeMillis().toString()
+        busy = true
+        status = "Восстановление задачи…"
+        val coordinator = AgentCoordinator.forContext(appContext, engine)
+        try {
+            ContextCompat.startForegroundService(
+                appContext,
+                Intent(appContext, GenerationForegroundService::class.java)
+                    .setAction(GenerationForegroundService.ACTION_START)
+                    .putExtra(GenerationForegroundService.EXTRA_LOCAL_INFERENCE, !hybridMode)
+            )
+        } catch (error: Exception) {
+            busy = false
+            status = "Не удалось запустить фоновую службу: ${error.message ?: error.javaClass.simpleName}"
+            return
+        }
+        val job = BackgroundGenerationController.scope.launch {
+            val pending = StringBuilder()
+            suspend fun flush() {
+                if (pending.isEmpty()) return
+                val chunk = pending.toString()
+                pending.setLength(0)
+                withContext(Dispatchers.Main) {
+                    val index = messages.lastIndex
+                    if (index >= 0) messages[index] = messages[index].copy(text = messages[index].text + chunk)
+                }
+            }
+            var title = "Ответ готов"
+            var notification = "Продолженная задача завершена. Нажмите, чтобы открыть чат."
+            try {
+                withContext(Dispatchers.IO) {
+                    coordinator.resumePlan(saved.plan.id, 4096, hybridMode).collect { event ->
+                        if (event is AgentTaskEvent.StepOutput) pending.append(event.text)
+                        if (pending.length >= 256) flush()
+                    }
+                }
+                flush()
+                status = "Задача продолжена и завершена."
+            } catch (error: CancellationException) {
+                withContext(Dispatchers.NonCancellable) { flush() }
+                status = "Продолжение задачи остановлено. Прогресс сохранён."
+                title = "Задача приостановлена"
+                notification = "Прогресс сохранён. Можно продолжить из меню."
+                throw error
+            } catch (error: Exception) {
+                flush()
+                val message = "Не удалось продолжить задачу: ${error.message ?: error.javaClass.simpleName}"
+                val index = messages.lastIndex
+                if (index >= 0) messages[index] = messages[index].copy(text = message)
+                status = message
+                title = "Ошибка продолжения задачи"
+                notification = message
+            } finally {
+                busy = false
+                BackgroundGenerationController.currentJob = null
+                appContext.startService(
+                    Intent(appContext, GenerationForegroundService::class.java)
+                        .setAction(GenerationForegroundService.ACTION_COMPLETE)
+                        .putExtra(GenerationForegroundService.EXTRA_TITLE, title)
+                        .putExtra(GenerationForegroundService.EXTRA_MESSAGE, notification)
+                )
+                resumableAgentPlans = withContext(NonCancellable + Dispatchers.IO) {
+                    AgentTaskStore.get(appContext).listResumable()
+                }
+            }
+        }
+        BackgroundGenerationController.currentJob = job
+    }
+
     fun sendMessage() {
         val userText = input.trim()
         if ((userText.isEmpty() && attachments.isEmpty()) || busy) return
@@ -942,6 +1033,29 @@ fun MainScreen() {
                         scope.launch { drawerState.close() }
                     }
                 )
+                resumableAgentPlans.forEach { savedPlan ->
+                    val completedCount = savedPlan.steps.count {
+                        it.status == com.mikhaildezprofi.mobileaiagent.AgentStepStatus.COMPLETED
+                    }
+                    NavigationDrawerItem(
+                        label = {
+                            Column {
+                                Text("Продолжить: ${savedPlan.plan.title}", maxLines = 1)
+                                Text(
+                                    "Готово ${completedCount}/${savedPlan.steps.size} шагов",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        },
+                        selected = false,
+                        icon = { Icon(Icons.Default.Memory, contentDescription = null) },
+                        enabled = !busy,
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            resumeSavedAgentPlan(savedPlan)
+                        }
+                    )
+                }
                 NavigationDrawerItem(
                     label = { Text("Модель и режим работы") },
                     selected = false,

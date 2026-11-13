@@ -67,7 +67,8 @@ class AgentCoordinator(
     private val cloud: CloudModelProvider? = null,
     private val visionReady: Boolean = false,
     private val planExecutionMutex: Mutex = Mutex(),
-    private val executorRegistry: AgentExecutorRegistry = AgentExecutorRegistry.default()
+    private val executorRegistry: AgentExecutorRegistry = AgentExecutorRegistry.default(),
+    private val taskStore: AgentTaskPersistence? = null
 ) {
     fun capabilities(): List<AgentCapability> = AgentToolRegistry.forRuntime(
         localReady = local.isAvailable,
@@ -225,46 +226,92 @@ class AgentCoordinator(
         }
     }
 
-    /** Executes a validated plan sequentially; each step receives only completed dependency results. */
+    /** Lists plans interrupted by cancellation or process death and available for resumption. */
+    fun resumablePlans(): List<SavedAgentPlan> = taskStore?.listResumable().orEmpty()
+
+    /** Resumes a persisted plan, retaining completed steps and rerunning only unfinished steps. */
+    fun resumePlan(
+        planId: String,
+        maxTokensPerStep: Int,
+        hybridMode: Boolean
+    ): Flow<AgentTaskEvent> = flow {
+        val store = taskStore ?: throw IllegalStateException("Хранилище задач не подключено.")
+        val saved = store.loadPlan(planId)
+            ?: throw IllegalArgumentException("Сохранённый план не найден: $planId")
+        saved.steps.filter { it.status != AgentStepStatus.COMPLETED }.forEach { step ->
+            store.setStepStatus(planId, step.step.id, AgentStepStatus.PENDING)
+        }
+        store.setPlanStatus(planId, AgentPlanStatus.RUNNING)
+        emitAll(executePlan(saved.plan, maxTokensPerStep, hybridMode))
+    }
+
+    /** Executes sequentially and journals each completed step for safe process-death recovery. */
     fun executePlan(
         plan: AgentTaskPlan,
         maxTokensPerStep: Int,
         hybridMode: Boolean
     ): Flow<AgentTaskEvent> = flow {
         plan.validate()
-        planExecutionMutex.withLock {
-            emit(AgentTaskEvent.PlanStarted(plan))
-            val results = linkedMapOf<String, String>()
-            plan.steps.forEachIndexed { index, step ->
-                emit(AgentTaskEvent.StepStarted(step, index + 1, plan.steps.size))
-                val dependencyContext = step.dependsOn.joinToString("\n\n") { dependencyId ->
-                    val dependency = plan.steps.first { it.id == dependencyId }
-                    "Результат шага «${dependency.title}»:\n${results.getValue(dependencyId)}"
+        taskStore?.savePlan(plan)
+        taskStore?.setPlanStatus(plan.id, AgentPlanStatus.RUNNING)
+        var activeStepId: String? = null
+        try {
+            planExecutionMutex.withLock {
+                emit(AgentTaskEvent.PlanStarted(plan))
+                val saved = taskStore?.loadPlan(plan.id)
+                val results = linkedMapOf<String, String>()
+                saved?.steps?.filter { it.status == AgentStepStatus.COMPLETED }?.forEach {
+                    results[it.step.id] = it.result
                 }
-                val stepPrompt = buildString {
-                    appendLine("Ты выполняешь шаг ${index + 1} из ${plan.steps.size} общего плана «${plan.title}».")
-                    appendLine("Исходная задача: ${plan.originalPrompt}")
-                    if (dependencyContext.isNotBlank()) {
-                        appendLine("Результаты необходимых предыдущих шагов:")
-                        appendLine(dependencyContext)
+
+                plan.steps.forEachIndexed { index, step ->
+                    if (saved?.steps?.firstOrNull { it.step.id == step.id }?.status == AgentStepStatus.COMPLETED) {
+                        emit(AgentTaskEvent.StepCompleted(step, results.getValue(step.id)))
+                        return@forEachIndexed
                     }
-                    appendLine("Роль исполнителя: ${step.agentRole}")
-                    appendLine("Текущее задание: ${step.prompt}")
-                    append("Выполни только это задание. Не утверждай, что внешние действия выполнены, если они не запускались и не проверялись.")
+                    activeStepId = step.id
+                    taskStore?.setStepStatus(plan.id, step.id, AgentStepStatus.RUNNING)
+                    emit(AgentTaskEvent.StepStarted(step, index + 1, plan.steps.size))
+                    val dependencyContext = step.dependsOn.joinToString("\n\n") { dependencyId ->
+                        val dependency = plan.steps.first { it.id == dependencyId }
+                        "Результат шага «${dependency.title}»:\n${results.getValue(dependencyId)}"
+                    }
+                    val stepPrompt = buildString {
+                        appendLine("Ты выполняешь шаг ${index + 1} из ${plan.steps.size} общего плана «${plan.title}».")
+                        appendLine("Исходная задача: ${plan.originalPrompt}")
+                        if (dependencyContext.isNotBlank()) {
+                            appendLine("Результаты необходимых предыдущих шагов:")
+                            appendLine(dependencyContext)
+                        }
+                        appendLine("Роль исполнителя: ${step.agentRole}")
+                        appendLine("Текущее задание: ${step.prompt}")
+                        append("Выполни только это задание. Не утверждай, что внешние действия выполнены, если они не запускались и не проверялись.")
+                    }
+                    val result = StringBuilder()
+                    val executor = executorRegistry.resolve(step.agentRole)
+                    executor.execute(stepPrompt, maxTokensPerStep) { specializedPrompt, tokenLimit ->
+                        generate(specializedPrompt, tokenLimit, hybridMode)
+                    }.collect { chunk ->
+                        result.append(chunk)
+                        emit(AgentTaskEvent.StepOutput(step.id, chunk))
+                    }
+                    val completed = result.toString()
+                    results[step.id] = completed
+                    taskStore?.completeStep(plan.id, step.id, completed)
+                    activeStepId = null
+                    emit(AgentTaskEvent.StepCompleted(step, completed))
                 }
-                val result = StringBuilder()
-                val executor = executorRegistry.resolve(step.agentRole)
-                executor.execute(stepPrompt, maxTokensPerStep) { specializedPrompt, tokenLimit ->
-                    generate(specializedPrompt, tokenLimit, hybridMode)
-                }.collect { chunk ->
-                    result.append(chunk)
-                    emit(AgentTaskEvent.StepOutput(step.id, chunk))
-                }
-                val completed = result.toString()
-                results[step.id] = completed
-                emit(AgentTaskEvent.StepCompleted(step, completed))
+                taskStore?.setPlanStatus(plan.id, AgentPlanStatus.COMPLETED)
+                emit(AgentTaskEvent.PlanCompleted(plan.id, results.toMap()))
             }
-            emit(AgentTaskEvent.PlanCompleted(plan.id, results.toMap()))
+        } catch (cancelled: CancellationException) {
+            activeStepId?.let { taskStore?.setStepStatus(plan.id, it, AgentStepStatus.PENDING) }
+            taskStore?.setPlanStatus(plan.id, AgentPlanStatus.PAUSED)
+            throw cancelled
+        } catch (error: Exception) {
+            activeStepId?.let { taskStore?.setStepStatus(plan.id, it, AgentStepStatus.FAILED, error.message) }
+            taskStore?.setPlanStatus(plan.id, AgentPlanStatus.FAILED)
+            throw error
         }
     }
 
@@ -323,7 +370,8 @@ class AgentCoordinator(
             return AgentCoordinator(
                 local = engine?.let(::LocalLlamaProvider) ?: UnavailableLocalProvider,
                 cloud = GeminiCloudProvider(keyStore),
-                visionReady = (engine as? VisionInferenceEngine)?.isVisionReady() == true
+                visionReady = (engine as? VisionInferenceEngine)?.isVisionReady() == true,
+                taskStore = AgentTaskStore.get(context.applicationContext)
             )
         }
     }
