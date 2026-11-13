@@ -956,7 +956,6 @@ fun MainScreen() {
                 val videoAttachments = if (runtimeConfig.videoFrameExtractionEnabled) {
                     attached.filter { it.type == "Видео" && it.uri != null }
                 } else emptyList()
-                val hasVisualAttachments = imageSources.isNotEmpty() || videoAttachments.isNotEmpty()
                 val hasVideoAttachment = attached.any { it.type == "Видео" }
                 val hasVisualAttachments = imageSources.isNotEmpty() || hasVideoAttachment
                 if (hasVisualAttachments) {
