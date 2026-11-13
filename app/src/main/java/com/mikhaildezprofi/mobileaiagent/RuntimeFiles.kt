@@ -231,8 +231,9 @@ object RuntimeFiles {
             defaultMode = routingJson.optString("defaultMode", "hybrid")
                 .takeIf { it == "local" || it == "hybrid" } ?: "hybrid",
             fallbackToLocal = routingJson.optBoolean("fallbackToLocal", true),
-            cloudPreferredTasks = jsonStrings(routingJson.optJSONArray("cloudPreferredTasks"))
-                .ifEmpty { setOf("general", "code", "complex_reasoning") },
+            cloudPreferredTasks = routingJson.optJSONArray("cloudPreferredTasks")
+                ?.let { jsonStrings(it) }
+                ?: setOf("general", "code", "complex_reasoning"),
             localOnlyTasks = jsonStrings(routingJson.optJSONArray("localOnlyTasks")),
             currentInformationEnabled = routingJson.optJSONObject("currentInformation")
                 ?.optBoolean("enabled", false) == true,
@@ -252,8 +253,11 @@ object RuntimeFiles {
             voiceEnabled = module("voiceInput", "voice", true) &&
                 voiceJson.optJSONObject("input")?.optBoolean("enabled", true) != false,
             cameraEnabled = module("cameraCapture", "camera", true),
-            diagnosticsEnabled = module("diagnostics", "diagnostics",
-                diagnosticsJson.optBoolean("enabled", true)),
+            diagnosticsEnabled = if (prefs.contains("module.diagnostics")) {
+                prefs.getBoolean("module.diagnostics", diagnosticsJson.optBoolean("enabled", true))
+            } else {
+                diagnosticsJson.optBoolean("enabled", legacyModules.optBoolean("diagnostics", true))
+            },
             videoFrameExtractionEnabled = module("videoFrameExtraction", "videoFrameExtraction", true),
             documentReadingEnabled = module("documentReading", "documentReading", true),
             visionInferenceEnabled = module("visionInference", "visionInference", true),
