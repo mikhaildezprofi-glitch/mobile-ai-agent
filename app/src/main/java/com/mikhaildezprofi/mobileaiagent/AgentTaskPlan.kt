@@ -20,6 +20,7 @@ data class AgentTaskPlan(
         steps.forEach { step ->
             require(step.id.isNotBlank() && seen.add(step.id)) { "Идентификатор шага пуст или повторяется: ${step.id}" }
             require(step.title.isNotBlank() && step.prompt.isNotBlank()) { "Шаг ${step.id} не содержит задания." }
+            require(step.agentRole.isNotBlank() && step.agentRole.length <= 40) { "Недопустимая роль исполнителя в шаге ${step.id}." }
             require(step.id !in step.dependsOn) { "Шаг ${step.id} зависит от самого себя." }
             require(step.dependsOn.all(seen::contains)) {
                 "Зависимости шага ${step.id} должны ссылаться только на предыдущие шаги."
@@ -42,7 +43,8 @@ data class AgentTaskStep(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
     val prompt: String,
-    val dependsOn: List<String> = emptyList()
+    val dependsOn: List<String> = emptyList(),
+    val agentRole: String = "general"
 )
 
 sealed interface AgentTaskEvent {

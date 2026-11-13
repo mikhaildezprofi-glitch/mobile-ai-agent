@@ -169,6 +169,61 @@ class AgentCoordinator(
         )
     }
 
+    /**
+     * Asks the best available coordinator model to plan complex/code requests, then executes
+     * the validated plan through the existing provider router. Simple requests keep the fast path.
+     */
+    fun generateWithPlanning(
+        prompt: String,
+        maxTokens: Int,
+        hybridMode: Boolean
+    ): Flow<String> = flow {
+        val task = classify(prompt)
+        val needsPlan = task == AgentTaskKind.CODE || task == AgentTaskKind.COMPLEX_REASONING ||
+            prompt.length > 1_200 || listOf("поэтапно", "несколько этапов", "сначала", "затем", "проект целиком")
+                .any { phrase -> prompt.lowercase().contains(phrase) }
+        if (!needsPlan) {
+            emitAll(generate(prompt, maxTokens, hybridMode))
+            return@flow
+        }
+
+        val plannerProvider = if (hybridMode && cloud?.isAvailable == true) cloud else local
+        check(plannerProvider.isAvailable) {
+            "Для составления плана нужна доступная модель. Настройте Gemini или загрузите локальную модель."
+        }
+        val plannerText = StringBuilder()
+        try {
+            plannerProvider.generate(AgentTaskPlanner.buildPrompt(prompt), AgentTaskPlanner.MAX_PLANNER_TOKENS)
+                .collect { plannerText.append(it) }
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            Log.w(TAG, "Planning request failed; using single-step execution (${error.javaClass.simpleName}).")
+        }
+
+        val plan = if (plannerText.isNotBlank()) {
+            runCatching { AgentTaskPlanner.parse(plannerText.toString(), prompt) }
+                .onFailure { Log.w(TAG, "Planner response rejected; using single-step execution (${it.javaClass.simpleName}).") }
+                .getOrNull()
+        } else null
+        val validatedPlan = plan ?: AgentTaskPlan.single(prompt).also {
+            emit("Не удалось получить корректный план. Выполняю запрос одним шагом.\n\n")
+        }
+
+        executePlan(validatedPlan, maxTokens, hybridMode).collect { event ->
+            when (event) {
+                is AgentTaskEvent.PlanStarted -> if (event.plan.steps.size > 1) {
+                    emit("План: ${event.plan.title} (${event.plan.steps.size} шага).\n\n")
+                }
+                is AgentTaskEvent.StepStarted -> if (event.total > 1) {
+                    emit("\n[${event.index}/${event.total}] ${event.step.title} · ${event.step.agentRole}\n")
+                }
+                is AgentTaskEvent.StepOutput -> emit(event.text)
+                is AgentTaskEvent.StepCompleted -> Unit
+                is AgentTaskEvent.PlanCompleted -> Unit
+            }
+        }
+    }
+
     /** Executes a validated plan sequentially; each step receives only completed dependency results. */
     fun executePlan(
         plan: AgentTaskPlan,
@@ -192,6 +247,7 @@ class AgentCoordinator(
                         appendLine("Результаты необходимых предыдущих шагов:")
                         appendLine(dependencyContext)
                     }
+                    appendLine("Роль исполнителя: ${step.agentRole}")
                     appendLine("Текущее задание: ${step.prompt}")
                     append("Выполни только это задание. Не утверждай, что внешние действия выполнены, если они не запускались и не проверялись.")
                 }

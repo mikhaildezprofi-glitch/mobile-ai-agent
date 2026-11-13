@@ -108,6 +108,79 @@ class AgentCoordinatorTest {
     }
 
     @Test
+    fun complexRequestUsesCloudCoordinatorPlanThenExecutesItsSteps() = runBlocking {
+        val cloudPrompts = mutableListOf<String>()
+        val cloud = object : CloudModelProvider {
+            override val id = "gemini"
+            override val isAvailable = true
+            override fun generate(prompt: String, maxTokens: Int): Flow<String> = flow {
+                cloudPrompts += prompt
+                if (prompt.contains("главный координатор ИИ-агента")) {
+                    emit("""{"title":"План","steps":[{"id":"a","title":"Анализ","task":"Проанализируй задачу","agent":"research","depends_on":[]},{"id":"b","title":"Вывод","task":"Сформулируй вывод","agent":"writer","depends_on":["a"]}]}""")
+                } else {
+                    emit("step-result-${cloudPrompts.size}")
+                }
+            }
+        }
+
+        val output = AgentCoordinator(FakeProvider("local", true), cloud)
+            .generateWithPlanning("Разработай приложение и подробно проанализируй архитектуру", 256, true)
+            .toList()
+            .joinToString("")
+
+        assertEquals(3, cloudPrompts.size)
+        assertTrue(cloudPrompts[0].contains("главный координатор ИИ-агента"))
+        assertTrue(cloudPrompts[2].contains("Роль исполнителя: writer"))
+        assertTrue(output.contains("[1/2] Анализ"))
+        assertTrue(output.contains("step-result-2"))
+        assertTrue(output.contains("step-result-3"))
+    }
+
+    @Test
+    fun plannerParsesStructuredJsonAndPreservesRolesAndDependencies() {
+        val raw = """
+            ```json
+            {
+              "title": "Разработка",
+              "steps": [
+                {"id":"research", "title":"Исследование", "task":"Изучи требования", "agent":"research", "depends_on":[]},
+                {"id":"build", "title":"Разработка", "task":"Напиши реализацию", "agent":"developer", "depends_on":["research"]}
+              ]
+            }
+            ```
+        """.trimIndent()
+
+        val plan = AgentTaskPlanner.parse(raw, "Создай приложение")
+
+        assertEquals("Разработка", plan.title)
+        assertEquals("developer", plan.steps[1].agentRole)
+        assertEquals(listOf("research"), plan.steps[1].dependsOn)
+    }
+
+    @Test
+    fun plannerRejectsUnknownDependenciesAndTooManySteps() {
+        val unknownDependency = """{"title":"x","steps":[{"id":"a","task":"A","depends_on":["missing"]}]}"""
+        var rejected = false
+        try {
+            AgentTaskPlanner.parse(unknownDependency, "task")
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue(rejected)
+
+        val tooMany = (1..(AgentTaskPlan.MAX_STEPS + 1)).joinToString(",") {
+            """{"id":"s$it","task":"step $it","depends_on":[]}"""
+        }
+        rejected = false
+        try {
+            AgentTaskPlanner.parse("""{"title":"x","steps":[$tooMany]}""", "task")
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue(rejected)
+    }
+
+    @Test
     fun planRejectsForwardDependencies() {
         val stepA = AgentTaskStep(id = "a", title = "A", prompt = "A", dependsOn = listOf("b"))
         val stepB = AgentTaskStep(id = "b", title = "B", prompt = "B")

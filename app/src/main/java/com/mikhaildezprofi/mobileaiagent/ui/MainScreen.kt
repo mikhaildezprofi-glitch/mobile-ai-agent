@@ -852,7 +852,7 @@ fun MainScreen() {
                         effectivePrompt + "\n\nСистемное ограничение: приложены фото или видео, но совместимая vision-модель и mmproj не загружены. Не делай вид, что видел изображения или видео; честно сообщи, что их содержимое сейчас недоступно."
                     } else effectivePrompt
                     withContext(Dispatchers.IO) {
-                        coordinator.generate(
+                        coordinator.generateWithPlanning(
                             prompt = safePrompt,
                             maxTokens = 4096,
                             // File contents remain on-device until an explicit cloud-file policy exists.
