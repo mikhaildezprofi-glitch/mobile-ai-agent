@@ -14,7 +14,9 @@ import java.net.URL
 /** Gemini REST provider. API key is loaded from encrypted storage and never logged. */
 class GeminiCloudProvider(
     private val keyStore: GeminiApiKeyStore,
-    private val model: String = DEFAULT_MODEL
+    private val model: String = DEFAULT_MODEL,
+    private val connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
+    private val readTimeoutMs: Int = READ_TIMEOUT_MS
 ) : CloudModelProvider {
     override val id: String = "Google Gemini API"
     override val isAvailable: Boolean get() = keyStore.hasKey()
@@ -23,34 +25,39 @@ class GeminiCloudProvider(
     suspend fun testConnection(): String = withContext(Dispatchers.IO) {
         val key = keyStore.read()
             ?: throw IllegalStateException("Gemini API-ключ не настроен или не может быть расшифрован.")
-        val answer = request("Ответь одним словом: OK.", 64, key).trim()
+        val answer = request("Ответь одним словом: OK.", 64, key, 0.6).trim()
         if (answer.isBlank()) throw IllegalStateException("Gemini вернул пустой ответ при проверке.")
         "Подключение подтверждено. Ответ Gemini: ${answer.take(80)}"
     }
 
-    override fun generate(prompt: String, maxTokens: Int): Flow<String> = flow {
+    override fun generate(prompt: String, maxTokens: Int): Flow<String> =
+        generate(prompt, maxTokens, 0.6)
+
+    override fun generate(prompt: String, maxTokens: Int, temperature: Double): Flow<String> = flow {
         val key = keyStore.read()
             ?: throw IllegalStateException("Gemini API-ключ не настроен или не может быть расшифрован.")
         val answer = withContext(Dispatchers.IO) {
-            request(prompt, maxTokens.coerceIn(64, 8192), key)
+            request(prompt, maxTokens.coerceIn(64, 8192), key, temperature)
         }
         if (answer.isNotBlank()) emit(answer)
         else throw IllegalStateException("Gemini вернул пустой ответ.")
     }
 
-    private fun request(prompt: String, maxTokens: Int, apiKey: String): String {
+    private fun request(prompt: String, maxTokens: Int, apiKey: String, temperature: Double): String {
         val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
         val body = JSONObject()
             .put("contents", org.json.JSONArray().put(
                 JSONObject().put("role", "user").put(
                     "parts", org.json.JSONArray().put(JSONObject().put("text", prompt)))))
-            .put("generationConfig", JSONObject().put("maxOutputTokens", maxTokens))
+            .put("generationConfig", JSONObject()
+                .put("maxOutputTokens", maxTokens)
+                .put("temperature", temperature.coerceIn(0.0, 2.0)))
         var connection: HttpURLConnection? = null
         try {
             connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
+                connectTimeout = connectTimeoutMs
+                readTimeout = readTimeoutMs
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("Accept", "application/json")
