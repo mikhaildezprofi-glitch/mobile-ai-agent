@@ -61,6 +61,8 @@ data class AgentRuntimeConfig(
     val temperature: Double = 0.6,
     val maxPromptCharacters: Int = 24_000,
     val maxAttachmentCount: Int = 10,
+    val maxHistoryMessages: Int = 100,
+    val autoScrollDuringGeneration: Boolean = true,
     val placeholderNewChat: String = "Спросить AI",
     val placeholderReply: String = "Ответить AI",
     val voiceLanguage: String = "ru-RU",
@@ -280,6 +282,10 @@ object RuntimeFiles {
                 ?.optInt("maxPromptCharacters", 24_000)?.coerceIn(1024, 100_000) ?: 24_000,
             maxAttachmentCount = ui.optJSONObject("limits")
                 ?.optInt("maxAttachmentCount", 10)?.coerceIn(1, 10) ?: 10,
+            maxHistoryMessages = ui.optJSONObject("limits")
+                ?.optInt("maxHistoryMessages", 100)?.coerceIn(2, 200)?.let { it - (it % 2) } ?: 100,
+            autoScrollDuringGeneration = ui.optJSONObject("chat")
+                ?.optBoolean("autoScrollDuringGeneration", true) ?: true,
             placeholderNewChat = ui.optJSONObject("composer")
                 ?.optString("placeholderNewChat", "Спросить AI") ?: "Спросить AI",
             placeholderReply = ui.optJSONObject("composer")
