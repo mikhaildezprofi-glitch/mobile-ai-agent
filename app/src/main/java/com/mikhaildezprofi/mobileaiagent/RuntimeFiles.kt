@@ -234,7 +234,8 @@ object RuntimeFiles {
             cloudPreferredTasks = routingJson.optJSONArray("cloudPreferredTasks")
                 ?.let { jsonStrings(it) }
                 ?: setOf("general", "code", "complex_reasoning"),
-            localOnlyTasks = jsonStrings(routingJson.optJSONArray("localOnlyTasks")),
+            localOnlyTasks = jsonStrings(routingJson.optJSONArray("localOnlyTasks")) +
+                setOf("file_analysis", "image_analysis", "device_action"),
             currentInformationEnabled = routingJson.optJSONObject("currentInformation")
                 ?.optBoolean("enabled", false) == true,
             localMaxTokens = routingJson.optJSONObject("generation")

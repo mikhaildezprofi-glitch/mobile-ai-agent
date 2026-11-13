@@ -97,7 +97,8 @@ class AgentCoordinator(
         val taskId = task.name.lowercase()
         val cloudPreferred = routing.prefersCloud(taskId)
         val localOnly = taskId in routing.localOnlyTasks
-        val cloudAllowed = allowCloud && hybridMode && cloudPreferred && !localOnly
+        val cloudAllowed = allowCloud && hybridMode && cloudPreferred && !localOnly &&
+            task != AgentTaskKind.CURRENT_INFORMATION
 
         if (cloudAllowed && cloud?.isAvailable == true) {
             return AgentRoute(task, AgentProviderKind.CLOUD, "Задача направлена облачному провайдеру по runtime-маршруту.")

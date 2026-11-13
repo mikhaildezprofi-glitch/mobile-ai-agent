@@ -120,4 +120,19 @@ class AgentCoordinatorTest {
 
         assertEquals(AgentProviderKind.LOCAL, route.provider)
     }
+
+    @Test
+    fun currentInformationNeverBypassesMissingSearchProvider() {
+        val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
+        val routing = AgentRoutingConfig(
+            cloudPreferredTasks = setOf("current_information"),
+            currentInformationEnabled = true
+        )
+
+        val route = coordinator.route("Какая сейчас погода?", hybridMode = true, routing = routing)
+
+        assertEquals(AgentTaskKind.CURRENT_INFORMATION, route.task)
+        assertEquals(AgentProviderKind.LOCAL, route.provider)
+        assertTrue(route.warning?.contains("поисковый провайдер") == true)
+    }
 }
