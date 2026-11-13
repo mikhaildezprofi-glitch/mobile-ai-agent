@@ -90,5 +90,5 @@ while true; do
   fi
   LAST_WIFI_STATE="$WIFI_STATE"
 
-  sleep 15
+  sleep 300
 done

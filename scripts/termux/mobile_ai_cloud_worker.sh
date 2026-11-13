@@ -4,5 +4,5 @@ WORKER="$HOME/mobile_ai_cloud_worker.py"
 LOG="$HOME/mobile_ai_cloud_worker.log"
 while true; do
   /data/data/com.termux/files/usr/bin/python "$WORKER" >> "$LOG" 2>&1 || true
-  sleep 30
+  sleep 120
 done
