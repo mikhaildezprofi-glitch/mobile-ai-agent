@@ -8,10 +8,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 
-/**
- * Central request coordinator. It classifies intent, selects a provider and
- * keeps provider fallback decisions in one place instead of the UI.
- */
 enum class AgentTaskKind {
     GENERAL, CODE, COMPLEX_REASONING, CURRENT_INFORMATION,
     FILE_ANALYSIS, IMAGE_ANALYSIS, DEVICE_ACTION
@@ -30,6 +26,8 @@ interface AgentModelProvider {
     val id: String
     val isAvailable: Boolean
     fun generate(prompt: String, maxTokens: Int): Flow<String>
+    fun generate(prompt: String, maxTokens: Int, temperature: Double): Flow<String> =
+        generate(prompt, maxTokens)
 }
 
 private object UnavailableLocalProvider : AgentModelProvider {
@@ -51,19 +49,16 @@ private class LocalLlamaProvider(
         engine.sendUserPrompt(prompt, maxTokens)
 }
 
-/**
- * Cloud providers implement the same contract. No cloud endpoint or API key is
- * bundled in this build; a provider is considered usable only after explicit setup.
- */
 interface CloudModelProvider : AgentModelProvider
 
 class AgentCoordinator(
     private val local: AgentModelProvider,
-    private val cloud: CloudModelProvider? = null
+    private val cloud: CloudModelProvider? = null,
+    private val allowCloud: Boolean = true
 ) {
     fun capabilities(): List<AgentCapability> = AgentToolRegistry.forRuntime(
         localReady = local.isAvailable,
-        cloudReady = cloud?.isAvailable == true,
+        cloudReady = allowCloud && cloud?.isAvailable == true,
         fileReaderReady = true
     ).all()
 
@@ -93,31 +88,37 @@ class AgentCoordinator(
         }
     }
 
-    fun route(prompt: String, hybridMode: Boolean): AgentRoute {
+    fun route(
+        prompt: String,
+        hybridMode: Boolean,
+        routing: AgentRoutingConfig = AgentRoutingConfig()
+    ): AgentRoute {
         val task = classify(prompt)
-        // Hybrid mode sends ordinary text, coding and reasoning to Gemini.
-        // Files and images stay local; live web search and Android control are not connected.
-        val cloudPreferred = task in setOf(
-            AgentTaskKind.GENERAL,
-            AgentTaskKind.COMPLEX_REASONING,
-            AgentTaskKind.CODE
-        )
-        if (hybridMode && cloudPreferred && cloud?.isAvailable == true) {
-            return AgentRoute(task, AgentProviderKind.CLOUD, "Задача направлена облачному провайдеру.")
+        val taskId = task.name.lowercase()
+        val cloudPreferred = routing.prefersCloud(taskId)
+        val localOnly = taskId in routing.localOnlyTasks
+        val cloudAllowed = allowCloud && hybridMode && cloudPreferred && !localOnly
+
+        if (cloudAllowed && cloud?.isAvailable == true) {
+            return AgentRoute(task, AgentProviderKind.CLOUD, "Задача направлена облачному провайдеру по runtime-маршруту.")
         }
 
         val warning = when {
             task == AgentTaskKind.FILE_ANALYSIS ->
-                "Выбранные TXT, исходники и поддерживаемые DOCX/XLSX/PPTX читаются локально. PDF и бинарные форматы пока не извлекаются."
+                "Выбранные файлы обрабатываются локально. Передача вложений в облако запрещена текущей политикой."
             task == AgentTaskKind.IMAGE_ANALYSIS ->
-                "Инструмент анализа изображений ещё не подключён. Изображение не передаётся модели."
+                "Анализ изображений выполняется только совместимым локальным vision-модулем."
             task == AgentTaskKind.DEVICE_ACTION ->
                 "Инструменты управления Android ещё не подключены. Действие не выполняется."
+            task == AgentTaskKind.CURRENT_INFORMATION && !routing.currentInformationEnabled ->
+                "Поиск актуальной информации выключен в runtime-конфигурации и не подключён в клиенте."
             task == AgentTaskKind.CURRENT_INFORMATION ->
-                "Поиск в интернете ещё не подключён. Локальная модель не получает свежие данные."
+                "Флаг поиска включён, но поисковый провайдер ещё не встроен в APK."
             !local.isAvailable -> "Локальная модель не готова."
+            cloudPreferred && !allowCloud ->
+                "Облачный API отключён runtime-настройками. Используется локальная модель."
             hybridMode && cloudPreferred && cloud == null ->
-                "Облачный провайдер ещё не подключён. Запрос останется локальным."
+                "Облачный провайдер не подключён. Запрос останется локальным."
             hybridMode && cloudPreferred && cloud?.isAvailable == false ->
                 "Облачный провайдер не настроен. Используется локальная модель."
             else -> null
@@ -127,39 +128,60 @@ class AgentCoordinator(
             provider = AgentProviderKind.LOCAL,
             reason = when {
                 !hybridMode && cloudPreferred -> "Выбран локальный режим."
-                cloudPreferred -> "Используется локальная модель: облачный провайдер недоступен."
-                else -> "Используется локальная модель."
+                cloudPreferred -> "Используется локальная модель согласно fallback-политике."
+                else -> "Используется локальная модель согласно runtime-маршруту."
             },
             warning = warning
         )
     }
 
-    fun generate(prompt: String, maxTokens: Int, hybridMode: Boolean): Flow<String> = flow {
-        val decision = route(prompt, hybridMode)
-        Log.i(TAG, "task=${decision.task}, provider=${decision.provider}, reason=${decision.reason}")
+    fun generate(
+        prompt: String,
+        maxTokens: Int,
+        hybridMode: Boolean,
+        routing: AgentRoutingConfig = AgentRoutingConfig(),
+        systemPrompt: String = "",
+        temperature: Double = 0.6
+    ): Flow<String> = flow {
+        val decision = route(prompt, hybridMode, routing)
+        val taskId = decision.task.name.lowercase()
+        val cloudWasRequested = hybridMode && routing.prefersCloud(taskId) &&
+            taskId !in routing.localOnlyTasks
+        if (cloudWasRequested && decision.provider == AgentProviderKind.LOCAL &&
+            !routing.fallbackToLocal && allowCloud
+        ) {
+            throw IllegalStateException("Облачный провайдер недоступен, а fallbackToLocal выключен.")
+        }
+
+        val providerLimit = if (decision.provider == AgentProviderKind.CLOUD) {
+            routing.cloudMaxTokens
+        } else routing.localMaxTokens
+        val effectiveMaxTokens = maxTokens.coerceIn(64, 8192).coerceAtMost(providerLimit)
+        Log.i(TAG, "task=${decision.task}, provider=${decision.provider}, reason=${decision.reason}, maxTokens=$effectiveMaxTokens")
         Log.i(TAG, "capabilities=${capabilities().joinToString { "${it.id}:${it.available}" }}")
-        val providerPrompt = if (decision.provider == AgentProviderKind.CLOUD) {
-            prompt.removeSuffix("/no_think").trimEnd()
-        } else prompt
+
         when (decision.provider) {
             AgentProviderKind.LOCAL -> {
                 check(local.isAvailable) { "Локальная модель не готова к генерации." }
-                emitAll(local.generate(prompt, maxTokens))
+                emitAll(local.generate(prompt, effectiveMaxTokens))
             }
             AgentProviderKind.CLOUD -> {
                 val provider = cloud ?: error("Облачный провайдер не подключён.")
                 check(provider.isAvailable) { "Облачный провайдер не настроен." }
+                val userPrompt = prompt.removeSuffix("/no_think").trimEnd()
+                val providerPrompt = if (systemPrompt.isBlank()) userPrompt else
+                    "Системные инструкции:\n$systemPrompt\n\nЗапрос пользователя:\n$userPrompt"
                 try {
-                    emitAll(provider.generate(providerPrompt, maxTokens))
+                    emitAll(provider.generate(providerPrompt, effectiveMaxTokens, temperature.coerceIn(0.0, 2.0)))
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
                     Log.w(TAG, "Cloud request failed; switching to local provider (${error.javaClass.simpleName}).")
-                    check(local.isAvailable) {
-                        "Gemini недоступен (${error.message ?: error.javaClass.simpleName}), локальная модель не готова."
+                    check(routing.fallbackToLocal && local.isAvailable) {
+                        "Gemini недоступен (${error.message ?: error.javaClass.simpleName}); локальный fallback запрещён или модель не готова."
                     }
                     emit("Gemini недоступен (${error.message ?: error.javaClass.simpleName}). Переключаюсь на локальную модель.\n\n")
-                    emitAll(local.generate(prompt, maxTokens))
+                    emitAll(local.generate(prompt, maxTokens.coerceIn(64, 8192).coerceAtMost(routing.localMaxTokens)))
                 }
             }
         }
@@ -171,11 +193,16 @@ class AgentCoordinator(
         fun forLocalEngine(engine: InferenceEngine): AgentCoordinator =
             AgentCoordinator(LocalLlamaProvider(engine))
 
-        fun forContext(context: Context, engine: InferenceEngine?): AgentCoordinator {
+        fun forContext(
+            context: Context,
+            engine: InferenceEngine?,
+            allowCloud: Boolean = true
+        ): AgentCoordinator {
             val keyStore = GeminiApiKeyStore(context.applicationContext)
             return AgentCoordinator(
                 local = engine?.let(::LocalLlamaProvider) ?: UnavailableLocalProvider,
-                cloud = GeminiCloudProvider(keyStore)
+                cloud = if (allowCloud) GeminiCloudProvider(keyStore) else null,
+                allowCloud = allowCloud
             )
         }
     }
