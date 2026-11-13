@@ -1119,42 +1119,6 @@ fun MainScreen() {
                     }
                 }
                 flushPendingTokens()
-                                        lastUiFlush = now
-                                    }
-                                }
-                            }
-                        } finally {
-                            stagedImages.close()
-                        }
-                    } finally {
-                        extractedVideoFrames.forEach { source ->
-                            source.bitmap?.let { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
-                        }
-                    }
-                } else {
-                    val safePrompt = if (hasVisualAttachments) {
-                        effectivePrompt + "\n\nСистемное ограничение: приложены фото или видео, но совместимая vision-модель и mmproj не загружены. Не делай вид, что видел изображения или видео; честно сообщи, что их содержимое сейчас недоступно."
-                    } else effectivePrompt
-                    withContext(Dispatchers.IO) {
-                        coordinator.generate(
-                            prompt = safePrompt,
-                            maxTokens = runtimeConfig.maxOutputTokens,
-                            // File contents remain on-device until an explicit cloud-file policy exists.
-                            hybridMode = mode == AgentMode.HYBRID && attached.isEmpty(),
-                            routing = runtimeConfig.routing,
-                            systemPrompt = systemPrompt,
-                            temperature = runtimeConfig.temperature
-                        ).collect { token ->
-                            pendingTokens.append(token)
-                            val now = SystemClock.elapsedRealtime()
-                            if (now - lastUiFlush >= 100L) {
-                                flushPendingTokens()
-                                lastUiFlush = now
-                            }
-                        }
-                    }
-                }
-                flushPendingTokens()
                 val finalIndex = messages.lastIndex
                 if (finalIndex >= 0 && messages[finalIndex].speaker == "MOBILE AI" &&
                     visibleChatText(messages[finalIndex].text).isBlank()
