@@ -315,7 +315,6 @@ fun MainScreen() {
             }
         )
     }
-    var visionAssetsInstalled by remember { mutableStateOf(visionAssetsInitiallyInstalled) }
     val qwenModelFile = remember(appContext) {
         File(appContext.filesDir, "models/Qwen3-1.7B-Q4_K_M.gguf")
     }
@@ -722,47 +721,6 @@ fun MainScreen() {
         }
     }
 
-    fun downloadAndActivateVisionModel() {
-        if (busy || visionDownloadBusy) return
-        scope.launch {
-            visionDownloadBusy = true
-            var modelActivationStarted = false
-            visionDownloadProgress = 0f
-            visionDownloadStatus = "Проверка файлов SmolVLM…"
-            try {
-                val assets = VisionModelAssets.download(appContext) { progress ->
-                    withContext(Dispatchers.Main) {
-                        visionDownloadProgress = progress.fraction
-                        val currentMb = progress.fileBytes / (1024L * 1024L)
-                        val totalMb = progress.fileTotalBytes / (1024L * 1024L)
-                        val overallMb = progress.completedBytes / (1024L * 1024L)
-                        val overallTotalMb = progress.totalBytes / (1024L * 1024L)
-                        visionDownloadStatus =
-                            "${progress.fileName}: $currentMb / $totalMb МБ • всего $overallMb / $overallTotalMb МБ"
-                    }
-                }
-                visionAssetsInstalled = true
-                if (busy) {
-                    visionDownloadStatus =
-                        "Файлы скачаны и проверены. Дождитесь завершения текущего ответа, затем нажмите загрузку ещё раз."
-                    return@launch
-                }
-                visionDownloadStatus = "Оба файла проверены по SHA-256. Загружаю модель…"
-                busy = true
-                modelActivationStarted = true
-                activateModelFileNow(assets.model, assets.projector)
-                visionDownloadStatus = "SmolVLM установлена и загружена. Qwen сохранена отдельно."
-            } catch (error: Exception) {
-                visionAssetsInstalled = VisionModelAssets.areAssetsPresent(appContext)
-                visionDownloadStatus = "Ошибка: ${error.message ?: error.javaClass.simpleName}"
-                status = visionDownloadStatus
-            } finally {
-                if (modelActivationStarted) busy = false
-                visionDownloadBusy = false
-            }
-        }
-    }
-
     fun retainReadPermission(uri: Uri) {
         runCatching {
             appContext.contentResolver.takePersistableUriPermission(
@@ -1043,7 +1001,6 @@ fun MainScreen() {
                                         "${progress.fileName}: $currentMb / $totalMb МБ • всего $overallMb / $overallTotalMb МБ"
                                 }
                             }
-                            visionAssetsInstalled = true
                             visionDownloadStatus = "Файлы Vision проверены. Переключаю движок…"
                             visionModelActivated = true
                             activateModelFileNow(assets.model, assets.projector)
@@ -1640,25 +1597,8 @@ fun MainScreen() {
                         LinearProgressIndicator(progress = visionDownloadProgress, modifier = Modifier.fillMaxWidth())
                     }
                     Text(visionDownloadStatus, style = MaterialTheme.typography.bodySmall)
-                    Button(
-                        onClick = { downloadAndActivateVisionModel() },
-                        enabled = engine != null && !busy && !visionDownloadBusy,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            if (visionAssetsInstalled) "Проверить и загрузить SmolVLM"
-                            else "Скачать и загрузить SmolVLM"
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = { activateModelFile(qwenModelFile, null) },
-                        enabled = qwenModelFile.isFile && engine != null && !busy && !visionDownloadBusy,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Переключиться на Qwen 1.7B")
-                    }
                     Text(
-                        "Загрузка идёт напрямую с Hugging Face. Перед активацией оба GGUF проверяются по SHA-256. Передача фотографий в облако не включается.",
+                        "Ручное переключение не требуется. При первом фото или видео координатор сам скачает и проверит SmolVLM, временно загрузит её, выполнит анализ и вернёт языковую модель. Исходные медиа остаются на телефоне; в гибридном режиме в облако может уйти только текстовое резюме локального анализа.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
