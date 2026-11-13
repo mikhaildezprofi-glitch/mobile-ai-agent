@@ -1725,6 +1725,18 @@ fun MainScreen() {
                         Text("Диагностика")
                     }
                     TextButton(
+                        onClick = {
+                            RuntimeFiles.clearModuleOverrides(appContext)
+                            val loaded = RuntimeFiles.load(appContext)
+                            runtimeFiles = loaded
+                            runtimeConfig = loaded.config
+                            configDraft = loaded.config
+                            selectedPromptProfileId = loaded.config.selectedPromptProfileId
+                            selectedResponseProfileId = loaded.config.selectedResponseProfileId
+                            status = "Локальные переопределения модулей сброшены. Применены значения из runtime JSON."
+                        }
+                    ) { Text("Сбросить локальные переопределения модулей") }
+                    TextButton(
                         enabled = !runtimeUpdateInProgress,
                         onClick = {
                             runtimeUpdateInProgress = true
@@ -1796,7 +1808,18 @@ fun MainScreen() {
                         )
                         RuntimeFiles.save(
                             appContext, savedConfig, promptDraft,
-                            selectedPromptProfileId, selectedResponseProfileId
+                            selectedPromptProfileId,
+                            selectedResponseProfileId,
+                            moduleOverrides = buildSet {
+                                if (savedConfig.attachmentsEnabled != runtimeConfig.attachmentsEnabled) add("attachments")
+                                if (savedConfig.voiceEnabled != runtimeConfig.voiceEnabled) add("voiceInput")
+                                if (savedConfig.cameraEnabled != runtimeConfig.cameraEnabled) add("cameraCapture")
+                                if (savedConfig.diagnosticsEnabled != runtimeConfig.diagnosticsEnabled) add("diagnostics")
+                                if (savedConfig.videoFrameExtractionEnabled != runtimeConfig.videoFrameExtractionEnabled) add("videoFrameExtraction")
+                                if (savedConfig.documentReadingEnabled != runtimeConfig.documentReadingEnabled) add("documentReading")
+                                if (savedConfig.visionInferenceEnabled != runtimeConfig.visionInferenceEnabled) add("visionInference")
+                                if (savedConfig.geminiApiEnabled != runtimeConfig.geminiApiEnabled) add("geminiApi")
+                            }
                         )
                         runtimeFiles = RuntimeFiles.load(appContext)
                         runtimeConfig = runtimeFiles.config
