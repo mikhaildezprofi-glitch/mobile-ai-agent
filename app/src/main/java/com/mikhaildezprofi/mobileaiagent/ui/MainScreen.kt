@@ -277,7 +277,10 @@ fun MainScreen() {
     }
 
     var mode by remember {
-        mutableStateOf(if (geminiKeyStore.hasKey()) AgentMode.HYBRID else AgentMode.LOCAL)
+        mutableStateOf(
+            if (RuntimeFiles.initialHybridMode(appContext, geminiKeyStore.hasKey())) AgentMode.HYBRID
+            else AgentMode.LOCAL
+        )
     }
     var status by remember { mutableStateOf("Инициализация llama.cpp…") }
     var diagnostics by remember { mutableStateOf(false) }
@@ -321,6 +324,10 @@ fun MainScreen() {
     var promptDraft by remember { mutableStateOf(systemPrompt) }
     var configDraft by remember { mutableStateOf(runtimeConfig) }
     var runtimeUpdateInProgress by remember { mutableStateOf(false) }
+    var selectedPromptProfileId by remember { mutableStateOf(runtimeConfig.selectedPromptProfileId) }
+    var selectedResponseProfileId by remember { mutableStateOf(runtimeConfig.selectedResponseProfileId) }
+    var promptProfileMenuExpanded by remember { mutableStateOf(false) }
+    var responseProfileMenuExpanded by remember { mutableStateOf(false) }
 
     val messages = ChatSessionState.messages
     val chatHistory = remember { mutableStateListOf<SavedChat>().apply { addAll(loadSavedChats(appContext)) } }
@@ -836,10 +843,13 @@ fun MainScreen() {
         status = "Модель генерирует ответ…"
 
         val activeEngine = engine
-        val coordinator = AgentCoordinator.forContext(appContext, activeEngine)
+        val coordinator = AgentCoordinator.forContext(
+            appContext, activeEngine, allowCloud = runtimeConfig.geminiApiEnabled
+        )
         val route = coordinator.route(
             prompt,
-            hybridMode = mode == AgentMode.HYBRID && attached.isEmpty()
+            hybridMode = mode == AgentMode.HYBRID && attached.isEmpty(),
+            routing = runtimeConfig.routing
         )
         status = route.warning ?: route.reason
         if (route.provider == AgentProviderKind.LOCAL && activeEngine == null) {
@@ -890,7 +900,14 @@ fun MainScreen() {
             try {
                 val textFileUris = attached.filter { it.type == "Файл" }.mapNotNull { it.uri }
                 val effectivePrompt = withContext(Dispatchers.IO) {
-                    SafeDocumentReader.appendSelectedFiles(prompt, appContext.contentResolver, textFileUris)
+                    val withDocuments = if (runtimeConfig.documentReadingEnabled) {
+                        SafeDocumentReader.appendSelectedFiles(prompt, appContext.contentResolver, textFileUris)
+                    } else if (textFileUris.isNotEmpty()) {
+                        prompt + "\n\nЧтение документов отключено в runtime-настройках. Содержимое файлов не прочитано."
+                    } else prompt
+                    if (!runtimeConfig.videoFrameExtractionEnabled && attached.any { it.type == "Видео" }) {
+                        withDocuments + "\n\nИзвлечение кадров видео отключено в runtime-настройках. Содержимое видео недоступно."
+                    } else withDocuments
                 }
                 val imageSources = attached.filter { it.type == "Фото" }.mapNotNull { attachment ->
                     when {
@@ -899,10 +916,13 @@ fun MainScreen() {
                         else -> null
                     }
                 }
-                val videoAttachments = attached.filter { it.type == "Видео" && it.uri != null }
+                val videoAttachments = if (runtimeConfig.videoFrameExtractionEnabled) {
+                    attached.filter { it.type == "Видео" && it.uri != null }
+                } else emptyList()
                 val hasVisualAttachments = imageSources.isNotEmpty() || videoAttachments.isNotEmpty()
                 val visionEngine = activeEngine as? VisionInferenceEngine
-                val visionReady = hasVisualAttachments && visionEngine?.isVisionReady() == true
+                val visionReady = runtimeConfig.visionInferenceEnabled &&
+                    hasVisualAttachments && visionEngine?.isVisionReady() == true
 
                 if (visionReady && visionEngine != null) {
                     status = if (videoAttachments.isNotEmpty()) "Извлечение кадров видео и подготовка изображений…"
@@ -930,7 +950,9 @@ fun MainScreen() {
                                 visionEngine.sendUserPromptWithImages(
                                     message = effectivePrompt + videoNote,
                                     imagePaths = stagedImages.files.map { it.absolutePath },
-                                    predictLength = 1024
+                                    predictLength = minOf(
+                                        1024, runtimeConfig.maxOutputTokens, runtimeConfig.routing.localMaxTokens
+                                    )
                                 ).collect { token ->
                                     pendingTokens.append(token)
                                     val now = SystemClock.elapsedRealtime()
@@ -955,9 +977,12 @@ fun MainScreen() {
                     withContext(Dispatchers.IO) {
                         coordinator.generate(
                             prompt = safePrompt,
-                            maxTokens = 4096,
+                            maxTokens = runtimeConfig.maxOutputTokens,
                             // File contents remain on-device until an explicit cloud-file policy exists.
-                            hybridMode = mode == AgentMode.HYBRID && attached.isEmpty()
+                            hybridMode = mode == AgentMode.HYBRID && attached.isEmpty(),
+                            routing = runtimeConfig.routing,
+                            systemPrompt = systemPrompt,
+                            temperature = runtimeConfig.temperature
                         ).collect { token ->
                             pendingTokens.append(token)
                             val now = SystemClock.elapsedRealtime()
@@ -1401,6 +1426,7 @@ fun MainScreen() {
                             checked = mode == AgentMode.HYBRID,
                             onCheckedChange = {
                                 mode = if (it) AgentMode.HYBRID else AgentMode.LOCAL
+                                RuntimeFiles.saveMode(appContext, mode == AgentMode.HYBRID)
                             }
                         )
                         Text("Гибридный")
@@ -1552,6 +1578,60 @@ fun MainScreen() {
                         Text(geminiAppStatus, style = MaterialTheme.typography.bodySmall)
                     }
                     HorizontalDivider()
+                    Text("Профиль помощника", fontWeight = FontWeight.SemiBold)
+                    Box {
+                        TextButton(onClick = { promptProfileMenuExpanded = true }) {
+                            Text(configDraft.promptProfiles.firstOrNull { it.id == selectedPromptProfileId }?.label
+                                ?: selectedPromptProfileId)
+                        }
+                        DropdownMenu(
+                            expanded = promptProfileMenuExpanded,
+                            onDismissRequest = { promptProfileMenuExpanded = false }
+                        ) {
+                            configDraft.promptProfiles.forEach { profile ->
+                                DropdownMenuItem(
+                                    text = { Text(profile.label) },
+                                    onClick = {
+                                        selectedPromptProfileId = profile.id
+                                        configDraft = configDraft.copy(selectedPromptProfileId = profile.id)
+                                        promptDraft = profile.content
+                                        promptProfileMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Text("Формат ответа", fontWeight = FontWeight.SemiBold)
+                    Box {
+                        TextButton(onClick = { responseProfileMenuExpanded = true }) {
+                            Text(configDraft.responseProfiles.firstOrNull { it.id == selectedResponseProfileId }?.label
+                                ?: selectedResponseProfileId)
+                        }
+                        DropdownMenu(
+                            expanded = responseProfileMenuExpanded,
+                            onDismissRequest = { responseProfileMenuExpanded = false }
+                        ) {
+                            configDraft.responseProfiles.forEach { profile ->
+                                DropdownMenuItem(
+                                    text = { Text(profile.label) },
+                                    onClick = {
+                                        selectedResponseProfileId = profile.id
+                                        configDraft = configDraft.copy(
+                                            selectedResponseProfileId = profile.id,
+                                            maxOutputTokens = profile.maxOutputTokens,
+                                            temperature = profile.temperature
+                                        )
+                                        responseProfileMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        "Лимит ответа: ${configDraft.maxOutputTokens} токенов • temperature: ${configDraft.temperature}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Text("Системный промпт")
                     OutlinedTextField(
                         value = promptDraft,
@@ -1561,6 +1641,34 @@ fun MainScreen() {
                         maxLines = 5
                     )
                     Text("Встроенные модули")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = configDraft.documentReadingEnabled,
+                            onCheckedChange = { configDraft = configDraft.copy(documentReadingEnabled = it) }
+                        )
+                        Text("Чтение документов")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = configDraft.videoFrameExtractionEnabled,
+                            onCheckedChange = { configDraft = configDraft.copy(videoFrameExtractionEnabled = it) }
+                        )
+                        Text("Извлечение кадров видео")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = configDraft.visionInferenceEnabled,
+                            onCheckedChange = { configDraft = configDraft.copy(visionInferenceEnabled = it) }
+                        )
+                        Text("Локальный анализ изображений")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = configDraft.geminiApiEnabled,
+                            onCheckedChange = { configDraft = configDraft.copy(geminiApiEnabled = it) }
+                        )
+                        Text("Gemini API")
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
                             checked = configDraft.attachmentsEnabled,
@@ -1600,7 +1708,9 @@ fun MainScreen() {
                                     runtimeFiles = loaded
                                     runtimeConfig = loaded.config
                                     configDraft = loaded.config
-                                    if (result.promptApplied) {
+                                    selectedPromptProfileId = loaded.config.selectedPromptProfileId
+                                    selectedResponseProfileId = loaded.config.selectedResponseProfileId
+                                    if (!loaded.customPrompt) {
                                         systemPrompt = loaded.systemPrompt
                                         promptDraft = loaded.systemPrompt
                                         engine?.let { active ->
@@ -1627,6 +1737,8 @@ fun MainScreen() {
                             runtimeFiles = loaded
                             runtimeConfig = loaded.config
                             configDraft = loaded.config
+                            selectedPromptProfileId = loaded.config.selectedPromptProfileId
+                            selectedResponseProfileId = loaded.config.selectedResponseProfileId
                             systemPrompt = loaded.systemPrompt
                             promptDraft = loaded.systemPrompt
                             engine?.let { active ->
@@ -1654,9 +1766,14 @@ fun MainScreen() {
                         val savedConfig = configDraft.copy(
                             inputMaxLines = configDraft.inputMaxLines.coerceIn(1, 3)
                         )
-                        RuntimeFiles.save(appContext, savedConfig, promptDraft)
+                        RuntimeFiles.save(
+                            appContext, savedConfig, promptDraft,
+                            selectedPromptProfileId, selectedResponseProfileId
+                        )
                         runtimeFiles = RuntimeFiles.load(appContext)
                         runtimeConfig = runtimeFiles.config
+                        selectedPromptProfileId = runtimeFiles.config.selectedPromptProfileId
+                        selectedResponseProfileId = runtimeFiles.config.selectedResponseProfileId
                         systemPrompt = runtimeFiles.systemPrompt
                         engine?.let { active ->
                             scope.launch {
