@@ -860,7 +860,8 @@ fun MainScreen() {
             hybridMode = mode == AgentMode.HYBRID && attached.isEmpty(),
             routing = runtimeConfig.routing
         )
-        status = route.warning ?: route.reason
+        status = (route.warning ?: route.reason) +
+            if (promptWasTruncated) " Текст запроса сокращён до ${runtimeConfig.maxPromptCharacters} символов." else ""
         if (route.provider == AgentProviderKind.LOCAL && activeEngine == null) {
             val message = "Локальный движок не инициализирован. Запросы без вложений доступны через Gemini в гибридном режиме при настроенном API-ключе; обработка вложений требует локального движка."
             val index = messages.lastIndex
@@ -1744,7 +1745,8 @@ fun MainScreen() {
                                         }
                                     }
                                     status = "Конфигурация ${result.version} проверена SHA-256 и загружена (${result.downloadedFiles} файлов)." +
-                                        if (result.promptApplied) " Основной промпт применён." else " Ваш пользовательский промпт сохранён."
+                                        if (loaded.customPrompt) " Пользовательский промпт сохранён."
+                                        else " Профиль ${loaded.config.selectedPromptProfileId} активен."
                                 } catch (error: Exception) {
                                     status = "Обновление конфигурации не выполнено: ${error.message ?: error.javaClass.simpleName}"
                                 } finally {
