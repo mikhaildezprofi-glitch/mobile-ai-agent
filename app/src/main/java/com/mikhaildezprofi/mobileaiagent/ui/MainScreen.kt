@@ -59,6 +59,7 @@ import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.VisionInferenceEngine
 import com.mikhaildezprofi.mobileaiagent.AgentCoordinator
+import com.mikhaildezprofi.mobileaiagent.AppBackupManager
 import com.mikhaildezprofi.mobileaiagent.VisionModelAssets
 import com.mikhaildezprofi.mobileaiagent.AgentProviderKind
 import com.mikhaildezprofi.mobileaiagent.ImageAttachmentSource
@@ -334,6 +335,53 @@ fun MainScreen() {
     val chatHistory = remember { mutableStateListOf<SavedChat>().apply { addAll(loadSavedChats(appContext)) } }
     var currentChatId by ChatSessionState.currentChatId
     val chatListState = rememberLazyListState()
+
+    val backupExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { AppBackupManager.export(appContext, uri) }
+            }.onSuccess {
+                status = "Резервная копия сохранена. Gemini API-ключ и файл модели в неё не входят."
+            }.onFailure { error ->
+                status = "Не удалось создать резервную копию: ${error.message ?: "ошибка"}"
+            }
+        }
+    }
+    val backupImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { AppBackupManager.restore(appContext, uri) }
+            }.onSuccess {
+                chatHistory.clear()
+                chatHistory.addAll(loadSavedChats(appContext))
+                messages.clear()
+                val latest = chatHistory.firstOrNull()
+                if (latest != null) {
+                    messages.addAll(latest.messages.takeLast(runtimeConfig.maxHistoryMessages))
+                    currentChatId = latest.id
+                } else {
+                    currentChatId = System.currentTimeMillis().toString()
+                }
+                runtimeFiles = RuntimeFiles.load(appContext)
+                runtimeConfig = runtimeFiles.config
+                systemPrompt = runtimeFiles.systemPrompt
+                promptDraft = systemPrompt
+                configDraft = runtimeConfig
+                selectedPromptProfileId = runtimeConfig.selectedPromptProfileId
+                selectedResponseProfileId = runtimeConfig.selectedResponseProfileId
+                mode = if (RuntimeFiles.initialHybridMode(appContext, geminiKeyStore.hasKey())) {
+                    AgentMode.HYBRID
+                } else AgentMode.LOCAL
+                status = "Данные восстановлены. Gemini API-ключ нужно настроить заново; модель Qwen можно выбрать из Download."
+            }.onFailure { error ->
+                status = "Не удалось восстановить резервную копию: ${error.message ?: "ошибка"}"
+            }
+        }
+    }
 
     // Apply runtime history limits immediately, including after a remote config refresh.
     LaunchedEffect(runtimeConfig.maxHistoryMessages) {
@@ -1114,6 +1162,38 @@ fun MainScreen() {
                         selectedPromptProfileId = runtimeConfig.selectedPromptProfileId
                         selectedResponseProfileId = runtimeConfig.selectedResponseProfileId
                         showSettingsDialog = true
+                        scope.launch { drawerState.close() }
+                    }
+                )
+                NavigationDrawerItem(
+                    label = { Text("Экспорт резервной копии") },
+                    selected = false,
+                    icon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                    onClick = {
+                        if (!busy) {
+                            if (messages.isNotEmpty()) {
+                                val title = messages.firstOrNull { it.speaker == "Вы" }?.text
+                                    ?.replace("\\n", " ")?.take(42)?.ifBlank { "Новый чат" } ?: "Новый чат"
+                                val active = SavedChat(currentChatId, title, messages.toList(), System.currentTimeMillis())
+                                val snapshot = (listOf(active) + chatHistory.filterNot { it.id == currentChatId }).take(50)
+                                chatHistory.clear()
+                                chatHistory.addAll(snapshot)
+                                saveSavedChats(appContext, snapshot)
+                            }
+                            backupExportLauncher.launch("MOBILE_AI_AGENT_backup.json")
+                        } else {
+                            status = "Дождитесь завершения генерации перед экспортом."
+                        }
+                        scope.launch { drawerState.close() }
+                    }
+                )
+                NavigationDrawerItem(
+                    label = { Text("Восстановить резервную копию") },
+                    selected = false,
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                    onClick = {
+                        if (!busy) backupImportLauncher.launch(arrayOf("application/json", "text/json", "*/*"))
+                        else status = "Дождитесь завершения генерации перед восстановлением."
                         scope.launch { drawerState.close() }
                     }
                 )
