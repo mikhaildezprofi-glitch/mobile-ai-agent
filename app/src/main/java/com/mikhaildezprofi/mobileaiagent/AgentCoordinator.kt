@@ -91,9 +91,10 @@ class AgentCoordinator(
     fun route(
         prompt: String,
         hybridMode: Boolean,
-        routing: AgentRoutingConfig = AgentRoutingConfig()
+        routing: AgentRoutingConfig = AgentRoutingConfig(),
+        taskOverride: AgentTaskKind? = null
     ): AgentRoute {
-        val task = classify(prompt)
+        val task = taskOverride ?: classify(prompt)
         val taskId = task.name.lowercase()
         val cloudPreferred = routing.prefersCloud(taskId)
         val localOnly = taskId in routing.localOnlyTasks
@@ -142,9 +143,10 @@ class AgentCoordinator(
         hybridMode: Boolean,
         routing: AgentRoutingConfig = AgentRoutingConfig(),
         systemPrompt: String = "",
-        temperature: Double = 0.6
+        temperature: Double = 0.6,
+        taskOverride: AgentTaskKind? = null
     ): Flow<String> = flow {
-        val decision = route(prompt, hybridMode, routing)
+        val decision = route(prompt, hybridMode, routing, taskOverride)
         val taskId = decision.task.name.lowercase()
         val cloudWasRequested = hybridMode && routing.prefersCloud(taskId) &&
             taskId !in routing.localOnlyTasks
