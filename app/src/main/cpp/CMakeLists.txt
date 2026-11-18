@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22.1)
 
+set(CMAKE_ANDROID_STL_TYPE c++_shared)
 project(jimmy_pocketpal_jni LANGUAGES C CXX)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
