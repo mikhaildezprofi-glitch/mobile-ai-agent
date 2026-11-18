@@ -96,6 +96,14 @@ The Kotlin layer must assemble fragmented tool-call arguments safely, validate t
 
 ## Current interim state
 
-The consolidated branch keeps the bounded JSON-envelope runner as a compatibility fallback for the old text-only llama.cpp provider. The new PocketPal JNI path now exposes structured tool calls and has a dedicated structured runner. The next integration step is to make AgentCoordinator and the Compose model lifecycle prefer PocketPal without loading two copies of the same GGUF model.
+The consolidated branch now contains:
+- A pinned checkout of PocketPal llama.rn at `ae0e55b7dacdb06d37843273204a3e7ff294a6a2`.
+- A standalone JNI bridge with model load/release, Jinja chat formatting, structured tool-call results, snapshot callback and cancellation.
+- A Kotlin `PocketPalNativeBridge` and `PocketPalStructuredAgentRunner`.
+- `PocketPalLocalProvider` selected by `AgentCoordinator.forContext()` as the primary local text provider.
+- A Compose model lifecycle that keeps the legacy llama.cpp engine unloaded for ordinary text generation and only loads it for the existing Vision path. This avoids loading the same Qwen GGUF into two engines simultaneously.
+- The legacy JSON-envelope runner and legacy local text provider have been removed from the active coordinator path.
 
-No claim is made that the new engine has been built into Jimmy or tested on the Exynos device yet.
+GitHub Actions run 44403357955 successfully built and verified both `librnllama.so` and `libjimmy_pocketpal_jni.so` as ARM64/AArch64 shared libraries. The artifact is `pocketpal-rnllama-arm64-cpu`. This is a native-library CI build, not an APK build.
+
+The Kotlin provider and UI cutover have not yet been validated on the physical Exynos device. The final APK build remains deferred until all additions and changes are complete.
