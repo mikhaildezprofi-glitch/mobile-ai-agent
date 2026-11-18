@@ -1,5 +1,6 @@
 package com.mikhaildezprofi.mobileaiagent
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.math.BigDecimal
 import java.math.MathContext
@@ -31,6 +32,33 @@ class AgentTalentRegistry private constructor(
     fun names(): Set<String> = talents.keys
     fun descriptions(): String = talents.values.joinToString("\n") {
         "- ${it.name}: ${it.description}"
+    }
+
+    /** OpenAI-compatible tool schemas consumed by PocketPal's Jinja chat formatter. */
+    fun openAiToolDefinitions(): JSONArray {
+        val calculate = JSONObject()
+            .put("type", "function")
+            .put("function", JSONObject()
+                .put("name", "calculate")
+                .put("description", "Вычислить безопасное математическое выражение.")
+                .put("parameters", JSONObject()
+                    .put("type", "object")
+                    .put("properties", JSONObject()
+                        .put("expression", JSONObject().put("type", "string").put("description", "Математическое выражение"))
+                        .put("precision", JSONObject().put("type", "integer").put("minimum", 1).put("maximum", 12)))
+                    .put("required", JSONArray().put("expression"))
+                    .put("additionalProperties", false)))
+        val datetime = JSONObject()
+            .put("type", "function")
+            .put("function", JSONObject()
+                .put("name", "datetime")
+                .put("description", "Получить текущие дату и время в часовом поясе IANA.")
+                .put("parameters", JSONObject()
+                    .put("type", "object")
+                    .put("properties", JSONObject()
+                        .put("timezone", JSONObject().put("type", "string").put("description", "Например Europe/Brussels")))
+                    .put("additionalProperties", false)))
+        return JSONArray().put(calculate).put(datetime)
     }
 
     fun execute(invocation: AgentToolInvocation): String {
