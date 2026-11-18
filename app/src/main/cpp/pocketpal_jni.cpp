@@ -14,8 +14,8 @@
 #include <locale>
 #include <memory>
 #include <mutex>
-#include <once_flag>
 #include <string>
+#include <stdexcept>
 #include <vector>
 
 using json = nlohmann::ordered_json;
