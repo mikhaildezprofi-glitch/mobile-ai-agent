@@ -510,6 +510,10 @@ fun MainScreen() {
         )
     }
 
+    androidx.compose.runtime.DisposableEffect(coordinator) {
+        onDispose { coordinator.close() }
+    }
+
     // Restore the most recently saved chat after Android has recreated the process.
     // Activity recreation in the same process keeps ChatSessionState and skips this path.
     LaunchedEffect(coordinator, busy) {
