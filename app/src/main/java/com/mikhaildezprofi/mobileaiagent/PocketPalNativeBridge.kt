@@ -31,6 +31,7 @@ internal data class PocketPalGenerationResult(
  * It owns one native context and serializes model lifecycle and generation through JNI.
  */
 internal class PocketPalNativeBridge : AutoCloseable {
+    private val lifecycleLock = Any()
     private var handle: Long
 
     init {
@@ -42,12 +43,16 @@ internal class PocketPalNativeBridge : AutoCloseable {
         check(handle != 0L) { "Не удалось создать нативный контекст PocketPal." }
     }
 
-    @Synchronized
     fun loadModel(modelPath: String, contextSize: Int = 4096, threads: Int = 4) {
-        check(handle != 0L) { "Нативный контекст PocketPal закрыт." }
         require(modelPath.isNotBlank()) { "Путь к GGUF-модели пуст." }
-        check(nativeLoadModel(handle, modelPath, contextSize, threads)) {
-            "Не удалось загрузить GGUF-модель через PocketPal."
+        synchronized(lifecycleLock) {
+            val currentHandle = synchronized(this) {
+                check(handle != 0L) { "Нативный контекст PocketPal закрыт." }
+                handle
+            }
+            check(nativeLoadModel(currentHandle, modelPath, contextSize, threads)) {
+                "Не удалось загрузить GGUF-модель через PocketPal."
+            }
         }
     }
 
@@ -58,31 +63,43 @@ internal class PocketPalNativeBridge : AutoCloseable {
         temperature: Float = 0.7f,
         listener: PocketPalSnapshotListener? = null
     ): PocketPalGenerationResult {
-        val currentHandle = synchronized(this) {
-            check(handle != 0L) { "Нативный контекст PocketPal закрыт." }
-            handle
+        val raw = synchronized(lifecycleLock) {
+            val currentHandle = synchronized(this) {
+                check(handle != 0L) { "Нативный контекст PocketPal закрыт." }
+                handle
+            }
+            nativeGenerate(
+                currentHandle,
+                messages.toString(),
+                tools.toString(),
+                maxTokens.coerceIn(1, 8192),
+                temperature.coerceIn(0f, 2f),
+                listener
+            )
         }
-        val raw = nativeGenerate(
-            currentHandle,
-            messages.toString(),
-            tools.toString(),
-            maxTokens.coerceIn(1, 8192),
-            temperature.coerceIn(0f, 2f),
-            listener
-        )
         return parseResult(raw)
     }
 
     fun cancel() {
-        val currentHandle = synchronized(this) { handle }
-        if (currentHandle != 0L) nativeCancel(currentHandle)
+        // Keep the handle stable while JNI flips the native cancellation flag.
+        synchronized(this) {
+            if (handle != 0L) nativeCancel(handle)
+        }
     }
 
-    @Synchronized
     override fun close() {
-        val currentHandle = handle
-        handle = 0L
-        if (currentHandle != 0L) nativeRelease(currentHandle)
+        val currentHandle = synchronized(this) {
+            val value = handle
+            handle = 0L
+            value
+        }
+        if (currentHandle != 0L) {
+            // Cancel before waiting for the generation lock so a running decode can exit.
+            nativeCancel(currentHandle)
+            synchronized(lifecycleLock) {
+                nativeRelease(currentHandle)
+            }
+        }
     }
 
     private external fun nativeCreateContext(): Long
