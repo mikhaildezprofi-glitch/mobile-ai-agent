@@ -3,7 +3,6 @@ package com.mikhaildezprofi.mobileaiagent
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CancellationException
-import com.arm.aichat.InferenceEngine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
@@ -37,25 +36,6 @@ interface AgentModelProvider {
         temperature: Double,
         systemPrompt: String
     ): Flow<String> = generate(prompt, maxTokens, temperature)
-}
-
-private object UnavailableLocalProvider : AgentModelProvider {
-    override val id: String = "llama.cpp / Qwen3"
-    override val isAvailable: Boolean = false
-    override fun generate(prompt: String, maxTokens: Int): Flow<String> = flow {
-        throw IllegalStateException("Нативный локальный движок не инициализирован.")
-    }
-}
-
-private class LocalLlamaProvider(
-    private val engine: InferenceEngine
-) : AgentModelProvider {
-    override val id: String = "llama.cpp / Qwen3"
-    override val isAvailable: Boolean
-        get() = engine.state.value is InferenceEngine.State.ModelReady
-
-    override fun generate(prompt: String, maxTokens: Int): Flow<String> =
-        engine.sendUserPrompt(prompt, maxTokens)
 }
 
 interface CloudModelProvider : AgentModelProvider
@@ -365,12 +345,9 @@ class AgentCoordinator(
     companion object {
         private const val TAG = "AgentCoordinator"
 
-        fun forLocalEngine(engine: InferenceEngine): AgentCoordinator =
-            AgentCoordinator(LocalLlamaProvider(engine))
-
         fun forContext(
             context: Context,
-            engine: InferenceEngine?,
+            @Suppress("UNUSED_PARAMETER") engine: Any?,
             allowCloud: Boolean = true,
             cloudModelId: String = "gemini-3.5-flash-lite",
             connectTimeoutSeconds: Int = 15,
