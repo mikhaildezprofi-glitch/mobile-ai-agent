@@ -2,36 +2,46 @@
 
 Canonical development branch: `integration/agent-consolidated-20261119`
 
-Base: `fix/gemini-handoff-clean-20261112` (16 commits ahead of `main` at consolidation time).
+Base: `fix/gemini-handoff-clean-20261112`, which already contained the task planner, task executor registry, SQLite journal and resumable plans. The consolidated branch is now the only active integration target.
 
 ## Consolidated work
 
-- The task planner, task executor registry, SQLite task journal, resumable plans, coordinator changes and current Compose screen are inherited from the Gemini handoff branch.
-- PocketPal's local talent registry and bounded tool runner are integrated into the same `AgentCoordinator`. The existing planner and task persistence remain in place; the tool runner is used for each ordinary generation and each plan step.
-- The local calculator and date/time talents are registered once in `AgentToolRegistry`.
-- The JVM test classpath uses a real `org.json` implementation; production Android JSON behavior is unchanged.
-- PocketPal native-core migration notes and the isolated ARM64 native-core workflow are included.
-- A separate unit-test-only workflow runs `:app:testDebugUnitTest` and does not assemble or sign an APK.
+- Task planner, task executor registry, SQLite task journal, resumable plans and Gemini routing.
+- PocketPal llama.rn native core, pinned to `ae0e55b7dacdb06d37843273204a3e7ff294a6a2`.
+- Jimmy-owned CMake target and JNI bridge for ARM64 CPU inference, Jinja chat formatting, structured tool calls, snapshots and cancellation.
+- Kotlin `PocketPalNativeBridge`, `PocketPalStructuredAgentRunner` and `PocketPalLocalProvider`.
+- `AgentCoordinator` now routes local text requests and local plan steps through PocketPal. Gemini remains a separate cloud provider.
+- The Compose model lifecycle does not load Qwen into the old llama.cpp engine. The old engine is retained only for the current Vision/MTMD path.
+- Local tools are allow-listed: `calculate` and `datetime`; maximum five sequential calls per request.
+- The old text JSON-envelope runner was deleted. There is one structured tool-calling path.
+- Chat history is passed into PocketPal prompts and native snapshots are converted into incremental text for the existing chat UI.
+- A separate unit-test workflow runs `:app:testDebugUnitTest`; it does not assemble or sign an APK.
+- The native workflow builds only ARM64 .so libraries.
 
 ## Superseded pull requests
 
-- PR #3 (installed Gemini app handoff): closed as duplicate. Its bridge, manifest package visibility and settings UI are already present on `main` and inherited by this branch.
-- PR #4 (task planning and persistence): closed as superseded. Its changes are the base of this branch.
-- PR #5 (PocketPal local talents): closed as superseded. Its implementation is consolidated into this branch and integrated with the task planner.
+- PR #3: installed Gemini app handoff. Closed as duplicate; `InstalledGeminiBridge`, package visibility and settings UI are already present in the inherited source.
+- PR #4: task planning and persistence. Closed as superseded; the task subsystem is the base of this branch.
+- PR #5: PocketPal local talents. Closed as superseded; its useful implementation has been replaced by the native structured tool path.
 
 ## Related branch history
 
-- `fix/pocketpal-talents-20261119` contains the PocketPal talents on top of the task-planner branch.
-- `fix/pocketpal-talents-main-20261119` contains the same talent adaptation on top of the older `main`.
-- `feat/pocketpal-native-core-android-20261119` adds the native-core migration documentation and native-only workflow to the main-based talent branch.
-- `feature/installed-gemini-clean-20261112` is an older version of the installed-Gemini work now present in `main`.
-- `feature/gemini-handoff-gitlab-20261112` and `sync/gemini-handoff-buildfix-20261112` point to the same commit.
+The following branches are historical source snapshots or intermediate implementations, not active development targets:
 
-Historical refs are intentionally retained for audit and rollback. They are not active development targets. The consolidated branch is the only branch to receive further integration work.
+- `feature/cloud-first-hybrid-20261111`: ancestor of the consolidated source; its cloud routing, privacy, runtime configuration and UI work are inherited.
+- `feature/vision-model-manager-20261111`: its verified SmolVLM download and installed-assets detection are present in the consolidated code. Its feature-branch APK trigger was intentionally not carried over.
+- `feature/installed-gemini-clean-20261112`: duplicate installed-Gemini implementation; the same bridge is already in the inherited source.
+- `feature/gemini-handoff-gitlab-20261112`, `sync/gemini-handoff-buildfix-20261112` and `sync/gemini-handoff-gitlab-20261112`: duplicate GitLab/GitHub sync snapshots. Their root version catalog and installed-Gemini source are present in the consolidated tree.
+- `fix/pocketpal-talents-20261119` and `fix/pocketpal-talents-main-20261119`: intermediate text-envelope talent runners; superseded by the structured PocketPal JNI runner.
+- `feat/pocketpal-native-core-android-20261119`: intermediate native-core build branch; its native source, pin and workflow are integrated here.
+- `fix/gemini-handoff-clean-20261112`: preserved as the historical base of the consolidated branch.
+
+Other branches such as `agent-queue`, `feature/hourly-device-watchdog` and `cloud/quality-gates-20261109` have separate automation/queue purposes and were not blindly merged into the Android application. No history was force-deleted. GitHub connector permissions available in this session do not expose a branch-delete operation, so superseded refs remain for audit/rollback; do not continue development on them.
 
 ## Build policy during development
 
 - Do not run the APK build workflow during feature development.
 - Use the unit-test-only workflow for JVM regression checks.
-- The PocketPal ARM64 native-core workflow builds only native `.so` files (never an APK). It successfully compiled `librnllama.so` and `libjimmy_pocketpal_jni.so` as ELF64/AArch64 and uploaded the `pocketpal-rnllama-arm64-cpu` artifact.
-- Create the final PR and run the APK build only after native JNI/Kotlin integration and the remaining additions are complete.
+- The PocketPal ARM64 native-core workflow builds only native shared libraries, never an APK. Run `44403357955` successfully produced `librnllama.so` and `libjimmy_pocketpal_jni.so`, verified as ELF64/AArch64.
+- A later native rebuild is validating the JNI UTF-8 and lower-memory batch changes.
+- The final APK workflow should run once after the remaining additions, integration and checks are complete.
