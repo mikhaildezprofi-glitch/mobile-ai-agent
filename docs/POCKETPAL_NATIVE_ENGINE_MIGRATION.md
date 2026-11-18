@@ -1,6 +1,6 @@
 # PocketPal native engine migration for Jimmy
 
-Status: migration plan. The standalone ARM64 CPU native-core build completed successfully in GitHub Actions; the library is not yet integrated into Jimmy's APK.
+Status: native core and Jimmy-owned JNI adapter both compile successfully for ARM64 in GitHub Actions. They are not yet assembled into an APK or runtime-tested on the Exynos device.
 
 ## Decision
 
@@ -96,6 +96,6 @@ The Kotlin layer must assemble fragmented tool-call arguments safely, validate t
 
 ## Current interim state
 
-The consolidated development branch now includes two local talents (calculate and datetime) using a bounded JSON-envelope loop because the current JNI bridge exposes only text tokens. This is a compatibility bridge, not the final tool-calling design. The native-engine migration must replace that envelope with structured tool_calls emitted by the PocketPal core.
+The consolidated branch keeps the bounded JSON-envelope runner as a compatibility fallback for the old text-only llama.cpp provider. The new PocketPal JNI path now exposes structured tool calls and has a dedicated structured runner. The next integration step is to make AgentCoordinator and the Compose model lifecycle prefer PocketPal without loading two copies of the same GGUF model.
 
 No claim is made that the new engine has been built into Jimmy or tested on the Exynos device yet.
