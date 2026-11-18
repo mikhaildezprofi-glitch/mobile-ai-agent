@@ -28,6 +28,8 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Au
     private fun currentModelFile(): File? {
         val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
         val saved = preferences.getString("model_path", null)?.let(::File)
+            ?.takeIf { !it.name.contains("SmolVLM", ignoreCase = true) &&
+                !it.name.contains("mmproj", ignoreCase = true) }
         val fallback = File(appContext.filesDir, "models/Qwen3-1.7B-Q4_K_M.gguf")
         return listOfNotNull(saved, fallback).firstOrNull {
             it.isFile && it.canRead() && it.length() > 0L
