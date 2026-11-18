@@ -7,7 +7,9 @@ enum class AgentCapabilityId {
     USER_SELECTED_TEXT_FILE_READING,
     IMAGE_UNDERSTANDING,
     WEB_SEARCH,
-    ANDROID_DEVICE_CONTROL
+    ANDROID_DEVICE_CONTROL,
+    LOCAL_CALCULATION,
+    LOCAL_DATE_TIME
 }
 
 data class AgentCapability(
@@ -65,6 +67,18 @@ class AgentToolRegistry private constructor(private val entries: List<AgentCapab
                 "Управление Android",
                 false,
                 "Исполнитель Android-действий и система подтверждения ещё не подключены."
+            ),
+            AgentCapability(
+                AgentCapabilityId.LOCAL_CALCULATION,
+                "Локальный калькулятор",
+                true,
+                "Безопасный арифметический парсер без выполнения кода и доступа к файловой системе."
+            ),
+            AgentCapability(
+                AgentCapabilityId.LOCAL_DATE_TIME,
+                "Дата и время",
+                true,
+                "Текущее время устройства или указанного часового пояса IANA."
             )
         ))
     }
