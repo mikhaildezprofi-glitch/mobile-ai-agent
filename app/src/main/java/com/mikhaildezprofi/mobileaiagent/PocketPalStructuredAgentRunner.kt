@@ -24,6 +24,7 @@ internal class PocketPalStructuredAgentRunner(
         var toolsEnabled = true
 
         repeat(maxToolCalls + 1) {
+            listener?.onTurnStarted()
             val result = bridge.generate(
                 messages = workingMessages,
                 tools = if (toolsEnabled) toolSchemas else JSONArray(),
@@ -81,6 +82,7 @@ internal class PocketPalStructuredAgentRunner(
 
         // The final turn has no tool definitions. This prevents a model that keeps
         // requesting tools from escaping the hard execution limit.
+        listener?.onTurnStarted()
         return bridge.generate(
             messages = workingMessages,
             tools = JSONArray(),
