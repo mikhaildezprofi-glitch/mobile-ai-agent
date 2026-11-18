@@ -32,11 +32,41 @@ struct NativeContext {
 
 std::string fromJavaString(JNIEnv * env, jstring value) {
     if (value == nullptr) return {};
-    const char * chars = env->GetStringUTFChars(value, nullptr);
+    const jchar * chars = env->GetStringChars(value, nullptr);
     if (chars == nullptr) return {};
-    std::string result(chars);
-    env->ReleaseStringUTFChars(value, chars);
-    return result;
+    const jsize length = env->GetStringLength(value);
+    std::string output;
+    output.reserve(static_cast<size_t>(length) * 3);
+
+    for (jsize index = 0; index < length; ++index) {
+        uint32_t codePoint = chars[index];
+        if (codePoint >= 0xd800 && codePoint <= 0xdbff &&
+            index + 1 < length && chars[index + 1] >= 0xdc00 && chars[index + 1] <= 0xdfff) {
+            codePoint = 0x10000 + ((codePoint - 0xd800) << 10) +
+                (static_cast<uint32_t>(chars[++index]) - 0xdc00);
+        } else if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
+            codePoint = 0xfffd;
+        }
+
+        if (codePoint <= 0x7f) {
+            output.push_back(static_cast<char>(codePoint));
+        } else if (codePoint <= 0x7ff) {
+            output.push_back(static_cast<char>(0xc0 | (codePoint >> 6)));
+            output.push_back(static_cast<char>(0x80 | (codePoint & 0x3f)));
+        } else if (codePoint <= 0xffff) {
+            output.push_back(static_cast<char>(0xe0 | (codePoint >> 12)));
+            output.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3f)));
+            output.push_back(static_cast<char>(0x80 | (codePoint & 0x3f)));
+        } else {
+            output.push_back(static_cast<char>(0xf0 | (codePoint >> 18)));
+            output.push_back(static_cast<char>(0x80 | ((codePoint >> 12) & 0x3f)));
+            output.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3f)));
+            output.push_back(static_cast<char>(0x80 | (codePoint & 0x3f)));
+        }
+    }
+
+    env->ReleaseStringChars(value, chars);
+    return output;
 }
 
 std::u16string utf8ToUtf16(const std::string & value) {
