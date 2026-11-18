@@ -28,9 +28,14 @@ internal data class PocketPalGenerationResult(
  * It owns one native context and serializes model lifecycle and generation through JNI.
  */
 internal class PocketPalNativeBridge : AutoCloseable {
-    private var handle: Long = nativeCreateContext()
+    private var handle: Long
 
     init {
+        // Load native libraries only when an engine instance is created. Pure JSON parsing
+        // remains usable from JVM unit tests where Android .so files are not present.
+        System.loadLibrary("rnllama")
+        System.loadLibrary("jimmy_pocketpal_jni")
+        handle = nativeCreateContext()
         check(handle != 0L) { "Не удалось создать нативный контекст PocketPal." }
     }
 
@@ -91,11 +96,6 @@ internal class PocketPalNativeBridge : AutoCloseable {
     private external fun nativeRelease(handle: Long)
 
     companion object {
-        init {
-            System.loadLibrary("rnllama")
-            System.loadLibrary("jimmy_pocketpal_jni")
-        }
-
         internal fun parseResult(raw: String): PocketPalGenerationResult {
             val root = JSONObject(raw)
             val calls = root.optJSONArray("tool_calls") ?: JSONArray()
