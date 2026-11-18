@@ -80,15 +80,41 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Au
                     messages.put(JSONObject().put("role", "system").put("content", systemPrompt))
                 }
                 messages.put(JSONObject().put("role", "user").put("content", prompt))
+                var previousSnapshot = ""
+                val listener = object : PocketPalSnapshotListener {
+                    override fun onTurnStarted() {
+                        previousSnapshot = ""
+                    }
+
+                    override fun onSnapshot(content: String, reasoning: String) {
+                        // Native parser snapshots are cumulative. Convert them to deltas
+                        // for the existing Compose chat collector. Reasoning stays hidden.
+                        val delta = if (content.startsWith(previousSnapshot)) {
+                            content.substring(previousSnapshot.length)
+                        } else {
+                            content
+                        }
+                        previousSnapshot = content
+                        if (delta.isNotEmpty()) trySend(delta)
+                    }
+                }
                 val result = PocketPalStructuredAgentRunner(active).generate(
                     messages = messages,
                     maxTokens = maxTokens.coerceIn(64, 8192),
-                    temperature = temperature.toFloat().coerceIn(0f, 2f)
+                    temperature = temperature.toFloat().coerceIn(0f, 2f),
+                    listener = listener
                 )
                 if (result.interrupted) {
                     throw CancellationException("PocketPal generation was interrupted.")
                 }
-                if (result.content.isNotBlank()) trySend(result.content)
+                if (result.content.isNotBlank() && previousSnapshot != result.content) {
+                    val delta = if (result.content.startsWith(previousSnapshot)) {
+                        result.content.substring(previousSnapshot.length)
+                    } else {
+                        result.content
+                    }
+                    if (delta.isNotEmpty()) trySend(delta)
+                }
                 close()
             } catch (cancelled: CancellationException) {
                 close(cancelled)
