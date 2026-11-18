@@ -2,7 +2,7 @@
 
 This change adapts the useful part of PocketPal's TalentRegistry / AgentRunner pattern to
 MOBILE AI AGENT's Kotlin and Android architecture. It does not copy PocketPal's React Native
-runtime or replace the existing AgentCoordinator, model providers, planner, or task journal.
+runtime or replace the existing AgentCoordinator, model providers, or local/vision/file processing paths. This phase does not add a persistent task planner; integration with that subsystem can follow when it is present on the target branch.
 
 ## Included in this phase
 
