@@ -1,6 +1,7 @@
 package com.mikhaildezprofi.mobileaiagent
 
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
