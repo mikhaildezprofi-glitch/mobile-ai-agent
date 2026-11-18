@@ -180,8 +180,8 @@ Java_com_mikhaildezprofi_mobileaiagent_PocketPalNativeBridge_nativeLoadModel(
         common_params params;
         params.model.path = path;
         params.n_ctx = std::clamp(static_cast<int>(contextSize), 512, 32768);
-        params.n_batch = 512;
-        params.n_ubatch = 256;
+        params.n_batch = 256;
+        params.n_ubatch = 128;
         params.n_parallel = 1;
         params.n_gpu_layers = 0;
         params.fit_params = false;
