@@ -151,6 +151,22 @@ class AgentCoordinator(
         temperature: Double = 0.6,
         taskOverride: AgentTaskKind? = null
     ): Flow<String> = flow {
+        emitAll(AgentToolRunner().run(prompt, maxTokens) { toolPrompt, tokenLimit ->
+            generateSingleTurn(
+                toolPrompt, tokenLimit, hybridMode, routing, systemPrompt, temperature, taskOverride
+            )
+        })
+    }
+
+    private fun generateSingleTurn(
+        prompt: String,
+        maxTokens: Int,
+        hybridMode: Boolean,
+        routing: AgentRoutingConfig,
+        systemPrompt: String,
+        temperature: Double,
+        taskOverride: AgentTaskKind?
+    ): Flow<String> = flow {
         val decision = route(prompt, hybridMode, routing, taskOverride)
         val taskId = decision.task.name.lowercase()
         val cloudWasRequested = hybridMode && routing.prefersCloud(taskId) &&
