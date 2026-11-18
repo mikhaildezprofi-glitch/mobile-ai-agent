@@ -1043,19 +1043,6 @@ fun MainScreen() {
         )
         status = (route.warning ?: route.reason) +
             if (promptWasTruncated) " Текст запроса сокращён до ${runtimeConfig.maxPromptCharacters} символов." else ""
-        if (route.provider == AgentProviderKind.LOCAL && activeEngine == null) {
-            val message = "Локальный движок не инициализирован. Запросы без вложений доступны через Gemini в гибридном режиме при настроенном API-ключе; обработка вложений требует локального движка."
-            val index = messages.lastIndex
-            if (index >= 0 && messages[index].speaker == "MOBILE AI") {
-                messages[index] = messages[index].copy(text = message)
-            }
-            attached.forEach { attachment ->
-                attachment.bitmap?.let { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
-            }
-            busy = false
-            status = message
-            return
-        }
         try {
             ContextCompat.startForegroundService(
                 appContext,
@@ -1099,6 +1086,17 @@ fun MainScreen() {
                     if (!runtimeConfig.videoFrameExtractionEnabled && attached.any { it.type == "Видео" }) {
                         withDocuments + "\n\nИзвлечение кадров видео отключено в runtime-настройках. Содержимое видео недоступно."
                     } else withDocuments
+                }
+                val priorMessages = messages.dropLast(2).takeLast(runtimeConfig.maxHistoryMessages)
+                val historyContext = priorMessages.joinToString("\n") { message ->
+                    "${message.speaker}: ${message.text}"
+                }.takeLast((runtimeConfig.maxPromptCharacters / 2).coerceAtLeast(512))
+                val conversationPrompt = if (historyContext.isBlank()) effectivePrompt else buildString {
+                    appendLine("История текущего диалога:")
+                    appendLine(historyContext)
+                    appendLine()
+                    appendLine("Новый запрос пользователя:")
+                    append(effectivePrompt)
                 }
                 val imageSources = attached.filter { it.type == "Фото" }.mapNotNull { attachment ->
                     when {
@@ -1225,6 +1223,11 @@ fun MainScreen() {
                     // Original photo/video files stay on-device. Only the text summary
                     // produced by the local Vision model can be routed to the cloud.
                     val languagePrompt = buildString {
+                        if (historyContext.isNotBlank()) {
+                            appendLine("История текущего диалога:")
+                            appendLine(historyContext)
+                            appendLine()
+                        }
                         appendLine("Запрос пользователя:")
                         appendLine(userText.ifBlank { "Проанализируй приложенные визуальные материалы." })
                         appendLine()
@@ -1255,7 +1258,7 @@ fun MainScreen() {
                 } else {
                     withContext(Dispatchers.IO) {
                         coordinator.generateWithPlanning(
-                            prompt = effectivePrompt,
+                            prompt = conversationPrompt,
                             maxTokens = runtimeConfig.maxOutputTokens,
                             // Documents and other attachments stay local unless a separate policy is added.
                             hybridMode = mode == AgentMode.HYBRID && attached.isEmpty(),
