@@ -494,7 +494,6 @@ fun MainScreen() {
     // One coordinator belongs to the chat session and is rebuilt only when provider
     // settings or the loaded local engine change.
     val coordinator = remember(
-        engine,
         runtimeConfig.geminiApiEnabled,
         runtimeConfig.geminiModelId,
         runtimeConfig.networkConnectTimeoutSeconds,
@@ -502,7 +501,6 @@ fun MainScreen() {
     ) {
         AgentCoordinator.forContext(
             appContext,
-            engine,
             allowCloud = runtimeConfig.geminiApiEnabled,
             cloudModelId = runtimeConfig.geminiModelId,
             connectTimeoutSeconds = runtimeConfig.networkConnectTimeoutSeconds,
