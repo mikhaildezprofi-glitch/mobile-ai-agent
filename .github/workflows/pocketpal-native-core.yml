@@ -1,8 +1,13 @@
 name: PocketPal Native Core ARM64 Check
 
 on:
-  # Manual only during development. The native core was already built once;
-  # defer further native builds and all APK builds until the final integration pass.
+  push:
+    branches:
+      - 'integration/agent-consolidated-*'
+    paths:
+      - 'app/src/main/cpp/**'
+      - 'app/src/main/java/com/mikhaildezprofi/mobileaiagent/PocketPalNativeBridge.kt'
+      - '.github/workflows/pocketpal-native-core.yml'
   workflow_dispatch:
 
 permissions:
