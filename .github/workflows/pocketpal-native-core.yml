@@ -51,33 +51,38 @@ jobs:
           test -f third_party/pocketpal-llama-rn/LICENSE
           grep -q "MIT License" third_party/pocketpal-llama-rn/LICENSE
 
-      - name: Configure ARM64 CPU-only native core
+      - name: Configure PocketPal core and Jimmy JNI adapter for ARM64
         shell: bash
         run: |
           set -euo pipefail
           NDK="$ANDROID_HOME/ndk/29.0.13113456"
           CMAKE="$ANDROID_HOME/cmake/3.31.6/bin/cmake"
           "$CMAKE" \
-            -S third_party/pocketpal-llama-rn/android/src/main/rnllama \
+            -S app/src/main/cpp \
             -B build/pocketpal-arm64 \
             -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-33 \
             -DCMAKE_BUILD_TYPE=Release \
+            -DPOCKETPAL_LLAMA_RN_ROOT="$GITHUB_WORKSPACE/third_party/pocketpal-llama-rn" \
             -DRNLLAMA_ANDROID_VARIANTS=rnllama
 
-      - name: Build native core
+      - name: Build PocketPal core and JNI adapter
         run: |
-          "$ANDROID_HOME/cmake/3.31.6/bin/cmake" --build build/pocketpal-arm64 --target rnllama --parallel 2
+          "$ANDROID_HOME/cmake/3.31.6/bin/cmake" --build build/pocketpal-arm64 --target jimmy_pocketpal_jni --parallel 2
 
-      - name: Verify ARM64 shared library
+      - name: Verify ARM64 shared libraries
         shell: bash
         run: |
           set -euo pipefail
-          LIB="build/pocketpal-arm64/librnllama.so"
-          test -s "$LIB"
-          "$ANDROID_HOME/ndk/29.0.13113456/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h "$LIB" | grep -E "Class:.*ELF64|Machine:.*AArch64"
-          sha256sum "$LIB"
+          CORE="build/pocketpal-arm64/pocketpal-rnllama/librnllama.so"
+          JNI="build/pocketpal-arm64/libjimmy_pocketpal_jni.so"
+          test -s "$CORE"
+          test -s "$JNI"
+          READELF="$ANDROID_HOME/ndk/29.0.13113456/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          "$READELF" -h "$CORE" | grep -E "Class:.*ELF64|Machine:.*AArch64"
+          "$READELF" -h "$JNI" | grep -E "Class:.*ELF64|Machine:.*AArch64"
+          sha256sum "$CORE" "$JNI"
 
       - name: Upload native core artifact
         uses: actions/upload-artifact@v4
