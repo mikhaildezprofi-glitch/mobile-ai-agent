@@ -45,7 +45,7 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Au
             active?.close()
             val next = PocketPalNativeBridge()
             try {
-                val cores = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+                val cores = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
                 next.loadModel(path, contextSize = 4096, threads = cores)
                 bridge = next
                 loadedPath = path
