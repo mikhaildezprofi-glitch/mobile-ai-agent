@@ -34,7 +34,7 @@ class AgentToolRegistry private constructor(private val entries: List<AgentCapab
                 AgentCapabilityId.LOCAL_TEXT_GENERATION,
                 "Локальная генерация текста",
                 localReady,
-                if (localReady) "Qwen3 через llama.cpp" else "Локальная модель не загружена"
+                if (localReady) "PocketPal llama.rn, GGUF CPU inference" else "Локальная GGUF-модель не найдена"
             ),
             AgentCapability(
                 AgentCapabilityId.GEMINI_TEXT_GENERATION,
