@@ -104,6 +104,8 @@ The consolidated branch now contains:
 - A Compose model lifecycle that keeps the legacy llama.cpp engine unloaded for ordinary text generation and only loads it for the existing Vision path. This avoids loading the same Qwen GGUF into two engines simultaneously.
 - The legacy JSON-envelope runner and legacy local text provider have been removed from the active coordinator path.
 
-GitHub Actions run 44403357955 successfully built and verified both `librnllama.so` and `libjimmy_pocketpal_jni.so` as ARM64/AArch64 shared libraries. The artifact is `pocketpal-rnllama-arm64-cpu`. This is a native-library CI build, not an APK build.
+GitHub Actions run 44406380286 successfully built and verified both `librnllama.so` and `libjimmy_pocketpal_jni.so` as ARM64/AArch64 shared libraries. The artifact is `pocketpal-rnllama-arm64-cpu`. SHA-256: `librnllama.so` = `798e3e022174aeed0bdac768db30e253398e67fc7b1fec716c8dd06167efa6a7`; `libjimmy_pocketpal_jni.so` = `b575e86269f03c68a89a366d9d4da7a4140f294e2b7957bf6ea1423941172040`. This is a native-library CI build, not an APK build.
+
+The unit-test-only workflow run 44406966524 also completed successfully after the process-wide provider and coordinator lifecycle changes.
 
 The Kotlin provider and UI cutover have not yet been validated on the physical Exynos device. The final APK build remains deferred until all additions and changes are complete.
