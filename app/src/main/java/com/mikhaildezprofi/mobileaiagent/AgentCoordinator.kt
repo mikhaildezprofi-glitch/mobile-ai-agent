@@ -192,7 +192,12 @@ class AgentCoordinator(
                         "Gemini недоступен (${error.message ?: error.javaClass.simpleName}); локальный fallback запрещён или модель не готова."
                     }
                     emit("Gemini недоступен (${error.message ?: error.javaClass.simpleName}). Переключаюсь на локальную модель.\n\n")
-                    emitAll(local.generate(prompt, maxTokens.coerceIn(64, 8192).coerceAtMost(routing.localMaxTokens)))
+                    emitAll(local.generate(
+                        prompt,
+                        maxTokens.coerceIn(64, 8192).coerceAtMost(routing.localMaxTokens),
+                        temperature.coerceIn(0.0, 2.0),
+                        systemPrompt
+                    ))
                 }
             }
         }
