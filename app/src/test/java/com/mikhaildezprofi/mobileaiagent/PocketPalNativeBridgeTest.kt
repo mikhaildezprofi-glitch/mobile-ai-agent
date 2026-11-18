@@ -37,4 +37,14 @@ class PocketPalNativeBridgeTest {
         )
         assertTrue(result.interrupted)
     }
+
+    @Test
+    fun exposesOnlyAllowlistedStructuredToolSchemas() {
+        val tools = AgentTalentRegistry.default().openAiToolDefinitions()
+        assertEquals(2, tools.length())
+        assertEquals("calculate", tools.getJSONObject(0).getJSONObject("function").getString("name"))
+        assertEquals("datetime", tools.getJSONObject(1).getJSONObject("function").getString("name"))
+        assertFalse(tools.toString().contains("shell"))
+        assertFalse(tools.toString().contains("adb"))
+    }
 }
