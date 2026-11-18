@@ -43,5 +43,5 @@ Other branches such as `agent-queue`, `feature/hourly-device-watchdog` and `clou
 - Do not run the APK build workflow during feature development.
 - Use the unit-test-only workflow for JVM regression checks.
 - The PocketPal ARM64 native-core workflow builds only native shared libraries, never an APK. Run `44403357955` successfully produced `librnllama.so` and `libjimmy_pocketpal_jni.so`, verified as ELF64/AArch64.
-- A later native rebuild is validating the JNI UTF-8 and lower-memory batch changes.
+- Unit-test run `44406966524` passed after the process-wide provider change. The final UI status wording is being rechecked by the latest unit-test-only run.
 - The final APK workflow should run once after the remaining additions, integration and checks are complete.
