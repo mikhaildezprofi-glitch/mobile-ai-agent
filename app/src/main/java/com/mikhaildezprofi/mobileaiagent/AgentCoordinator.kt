@@ -347,7 +347,6 @@ class AgentCoordinator(
 
         fun forContext(
             context: Context,
-            @Suppress("UNUSED_PARAMETER") engine: Any?,
             allowCloud: Boolean = true,
             cloudModelId: String = "gemini-3.5-flash-lite",
             connectTimeoutSeconds: Int = 15,
