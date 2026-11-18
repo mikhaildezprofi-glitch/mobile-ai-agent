@@ -47,11 +47,7 @@ class AgentCoordinator(
     private val planExecutionMutex: Mutex = Mutex(),
     private val executorRegistry: AgentExecutorRegistry = AgentExecutorRegistry.default(),
     private val taskStore: AgentTaskPersistence? = null
-) : AutoCloseable {
-    override fun close() {
-        (local as? AutoCloseable)?.close()
-    }
-
+) {
     fun capabilities(): List<AgentCapability> = AgentToolRegistry.forRuntime(
         localReady = local.isAvailable,
         cloudReady = allowCloud && cloud?.isAvailable == true,
@@ -359,7 +355,7 @@ class AgentCoordinator(
         ): AgentCoordinator {
             val keyStore = GeminiApiKeyStore(context.applicationContext)
             return AgentCoordinator(
-                local = PocketPalLocalProvider(context.applicationContext),
+                local = PocketPalLocalProvider.shared(context.applicationContext),
                 cloud = if (allowCloud) GeminiCloudProvider(
                     keyStore,
                     model = cloudModelId,
