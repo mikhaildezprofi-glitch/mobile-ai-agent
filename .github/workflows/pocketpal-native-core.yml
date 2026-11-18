@@ -39,7 +39,7 @@ jobs:
       - name: Install pinned Android NDK and CMake
         shell: bash
         run: |
-          yes | sdkmanager --licenses
+          yes | sdkmanager --licenses || test $? -eq 141
           sdkmanager "ndk;29.0.13113456" "cmake;3.31.6"
 
       - name: Record engine source revision
