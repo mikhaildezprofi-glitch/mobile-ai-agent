@@ -60,6 +60,14 @@ jobs:
           path: third_party/llama.cpp
           fetch-depth: 1
 
+      - name: Checkout pinned PocketPal llama.rn native core
+        uses: actions/checkout@v4
+        with:
+          repository: a-ghorbani/llama.rn
+          ref: ae0e55b7dacdb06d37843273204a3e7ff294a6a2
+          path: third_party/pocketpal-llama-rn
+          fetch-depth: 1
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
