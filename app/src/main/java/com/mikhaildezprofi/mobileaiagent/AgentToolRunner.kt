@@ -31,7 +31,7 @@ class AgentToolRunner(
         while (true) {
             val response = StringBuilder()
             try {
-                generate(currentPrompt, maxTokens.coerceIn(64, 8192)).collect(response::append)
+                generate(currentPrompt, maxTokens.coerceIn(64, 8192)).collect { chunk -> response.append(chunk) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             }
@@ -47,7 +47,7 @@ class AgentToolRunner(
                 val finalPrompt = AgentToolProtocol.continuation(prompt, toolResults) +
                     "\n\nЛимит инструментов исчерпан. Сейчас дай окончательный ответ без JSON и без новых вызовов."
                 try {
-                    generate(finalPrompt, maxTokens.coerceIn(64, 8192)).collect(finalResponse::append)
+                    generate(finalPrompt, maxTokens.coerceIn(64, 8192)).collect { chunk -> finalResponse.append(chunk) }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 }
