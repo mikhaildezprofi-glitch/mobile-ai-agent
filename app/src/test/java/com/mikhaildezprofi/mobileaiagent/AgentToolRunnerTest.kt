@@ -1,6 +1,5 @@
 package com.mikhaildezprofi.mobileaiagent
 
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -50,7 +49,7 @@ class AgentToolRunnerTest {
             if (invocations == 1) flowOf(
                 """{"tool_call":{"name":"calculate","arguments":{"expression":"6*7"}}}"""
             ) else flowOf("Ответ: 42")
-        }.collect(output::append)
+        }.collect { chunk -> output.append(chunk) }
 
         assertEquals(2, invocations)
         assertTrue(output.toString().contains("42"))
