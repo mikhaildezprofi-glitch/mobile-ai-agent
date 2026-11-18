@@ -30,6 +30,13 @@ interface AgentModelProvider {
     fun generate(prompt: String, maxTokens: Int): Flow<String>
     fun generate(prompt: String, maxTokens: Int, temperature: Double): Flow<String> =
         generate(prompt, maxTokens)
+
+    fun generate(
+        prompt: String,
+        maxTokens: Int,
+        temperature: Double,
+        systemPrompt: String
+    ): Flow<String> = generate(prompt, maxTokens, temperature)
 }
 
 private object UnavailableLocalProvider : AgentModelProvider {
@@ -150,13 +157,9 @@ class AgentCoordinator(
         systemPrompt: String = "",
         temperature: Double = 0.6,
         taskOverride: AgentTaskKind? = null
-    ): Flow<String> = flow {
-        emitAll(AgentToolRunner().run(prompt, maxTokens) { toolPrompt, tokenLimit ->
-            generateSingleTurn(
-                toolPrompt, tokenLimit, hybridMode, routing, systemPrompt, temperature, taskOverride
-            )
-        })
-    }
+    ): Flow<String> = generateSingleTurn(
+        prompt, maxTokens, hybridMode, routing, systemPrompt, temperature, taskOverride
+    )
 
     private fun generateSingleTurn(
         prompt: String,
@@ -187,7 +190,7 @@ class AgentCoordinator(
         when (decision.provider) {
             AgentProviderKind.LOCAL -> {
                 check(local.isAvailable) { "Локальная модель не готова к генерации." }
-                emitAll(local.generate(prompt, effectiveMaxTokens))
+                emitAll(local.generate(prompt, effectiveMaxTokens, temperature.coerceIn(0.0, 2.0), systemPrompt))
             }
             AgentProviderKind.CLOUD -> {
                 val provider = cloud ?: error("Облачный провайдер не подключён.")
@@ -371,7 +374,7 @@ class AgentCoordinator(
         ): AgentCoordinator {
             val keyStore = GeminiApiKeyStore(context.applicationContext)
             return AgentCoordinator(
-                local = engine?.let(::LocalLlamaProvider) ?: UnavailableLocalProvider,
+                local = PocketPalLocalProvider(context.applicationContext),
                 cloud = if (allowCloud) GeminiCloudProvider(
                     keyStore,
                     model = cloudModelId,
