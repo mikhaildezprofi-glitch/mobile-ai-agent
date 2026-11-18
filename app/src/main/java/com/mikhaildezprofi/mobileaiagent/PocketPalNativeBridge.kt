@@ -6,6 +6,9 @@ import org.json.JSONObject
 /** Snapshot callback from PocketPal's native completion parser. */
 internal fun interface PocketPalSnapshotListener {
     fun onSnapshot(content: String, reasoning: String)
+
+    /** Called before each assistant turn, including continuations after tool execution. */
+    fun onTurnStarted() = Unit
 }
 
 internal data class PocketPalToolCall(
