@@ -643,15 +643,16 @@ fun MainScreen() {
                     modelReady = true
                     status = "Vision-проектор загружен. Локальный анализ фото включён."
                 } else {
-                    status = "Загрузка модели в оперативную память…"
+                    val isVisionModel = modelFile.name.contains("SmolVLM", ignoreCase = true)
                     var projectorLoaded = false
-                    withContext(Dispatchers.IO) {
-                        if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
-                            activeEngine.state.value is InferenceEngine.State.Error
-                        ) activeEngine.cleanUp()
-                        activeEngine.loadModel(modelFile.absolutePath)
-                        if (systemPrompt.isNotBlank()) activeEngine.setSystemPrompt(systemPrompt)
-                        if (modelFile.name.contains("SmolVLM", ignoreCase = true)) {
+                    if (isVisionModel) {
+                        status = "Загрузка Vision-модели в отдельный движок…"
+                        withContext(Dispatchers.IO) {
+                            if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
+                                activeEngine.state.value is InferenceEngine.State.Error
+                            ) activeEngine.cleanUp()
+                            activeEngine.loadModel(modelFile.absolutePath)
+                            if (systemPrompt.isNotBlank()) activeEngine.setSystemPrompt(systemPrompt)
                             val expectedProjector = File(modelFile.parentFile, "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf")
                             val savedProjector = preferences.getString("vision_mmproj_path", null)?.let { File(it) }
                             val projector = listOfNotNull(savedProjector, expectedProjector)
@@ -663,14 +664,27 @@ fun MainScreen() {
                                 projectorLoaded = true
                             }
                         }
+                    } else {
+                        status = "Модель сохранена. PocketPal загрузит её при первом запросе…"
+                        withContext(Dispatchers.IO) {
+                            if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
+                                activeEngine.state.value is InferenceEngine.State.Error
+                            ) activeEngine.cleanUp()
+                        }
                     }
                     preferences.edit().putString("model_path", modelFile.absolutePath).apply()
                     visionRevision++
-                    modelReady = activeEngine.state.value is InferenceEngine.State.ModelReady
+                    modelReady = if (isVisionModel) {
+                        activeEngine.state.value is InferenceEngine.State.ModelReady
+                    } else {
+                        modelFile.isFile && modelFile.canRead() && modelFile.length() > 0L
+                    }
                     status = if (projectorLoaded) {
                         "SmolVLM загружена вместе с vision-проектором. Анализ фото включён."
+                    } else if (isVisionModel) {
+                        "SmolVLM загружена. Для анализа фото требуется совместимый mmproj."
                     } else {
-                        "Модель $selectedName загружена. Можно работать локально."
+                        "Модель ${selectedName} выбрана для PocketPal. Она загрузится при первом запросе."
                     }
                 }
                 showModelDialog = false
@@ -702,14 +716,19 @@ fun MainScreen() {
         check(modelFile.isFile && modelFile.canRead() && modelFile.length() > 0L) {
             "Файл модели не найден или недоступен."
         }
-        status = "Освобождение памяти и загрузка ${modelFile.name}…"
-        withContext(Dispatchers.IO) {
-            if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
-                activeEngine.state.value is InferenceEngine.State.Error
-            ) activeEngine.cleanUp()
-            activeEngine.loadModel(modelFile.absolutePath)
-            if (systemPrompt.isNotBlank()) activeEngine.setSystemPrompt(systemPrompt)
-            if (projectorFile != null) {
+        val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+        status = if (projectorFile != null) {
+            "Освобождение памяти и загрузка Vision-модели ${modelFile.name}…"
+        } else {
+            "Переключение текстовой модели на PocketPal…"
+        }
+        if (projectorFile != null) {
+            withContext(Dispatchers.IO) {
+                if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
+                    activeEngine.state.value is InferenceEngine.State.Error
+                ) activeEngine.cleanUp()
+                activeEngine.loadModel(modelFile.absolutePath)
+                if (systemPrompt.isNotBlank()) activeEngine.setSystemPrompt(systemPrompt)
                 check(projectorFile.isFile && projectorFile.canRead() && projectorFile.length() > 0L) {
                     "Vision-проектор не найден."
                 }
@@ -717,8 +736,15 @@ fun MainScreen() {
                     ?: error("Нативная библиотека не поддерживает vision.")
                 vision.loadVisionProjector(projectorFile.absolutePath)
             }
+        } else {
+            // PocketPal owns text inference. Keep the legacy engine unloaded to avoid
+            // holding a second copy of Qwen in RAM.
+            withContext(Dispatchers.IO) {
+                if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
+                    activeEngine.state.value is InferenceEngine.State.Error
+                ) activeEngine.cleanUp()
+            }
         }
-        val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
         val editor = preferences.edit().putString("model_path", modelFile.absolutePath)
         if (projectorFile != null) {
             editor.putString("vision_mmproj_path", projectorFile.absolutePath)
@@ -726,9 +752,13 @@ fun MainScreen() {
             editor.remove("vision_mmproj_path")
         }
         check(editor.commit()) { "Не удалось сохранить выбранную модель." }
-        modelReady = activeEngine.state.value is InferenceEngine.State.ModelReady
+        modelReady = if (projectorFile != null) {
+            activeEngine.state.value is InferenceEngine.State.ModelReady
+        } else {
+            modelFile.isFile && modelFile.canRead() && modelFile.length() > 0L
+        }
         visionRevision++
-        check(modelReady) { "Движок не подтвердил готовность модели." }
+        check(modelReady) { "Выбранная модель не готова к использованию." }
         status = if (projectorFile != null) {
             "SmolVLM загружена вместе с проверенным vision-проектором. Анализ фото включён."
         } else {
