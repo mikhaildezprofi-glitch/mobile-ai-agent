@@ -137,4 +137,15 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Au
             loadedPath = null
         }
     }
+
+    companion object {
+        @Volatile private var sharedInstance: PocketPalLocalProvider? = null
+
+        /** One process-wide native context so Activity recreation does not kill background generation. */
+        fun shared(context: Context): PocketPalLocalProvider = synchronized(this) {
+            sharedInstance ?: PocketPalLocalProvider(context.applicationContext).also {
+                sharedInstance = it
+            }
+        }
+    }
 }
