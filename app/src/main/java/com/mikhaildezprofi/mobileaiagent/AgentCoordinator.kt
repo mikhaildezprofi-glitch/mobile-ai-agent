@@ -67,7 +67,11 @@ class AgentCoordinator(
     private val planExecutionMutex: Mutex = Mutex(),
     private val executorRegistry: AgentExecutorRegistry = AgentExecutorRegistry.default(),
     private val taskStore: AgentTaskPersistence? = null
-) {
+) : AutoCloseable {
+    override fun close() {
+        (local as? AutoCloseable)?.close()
+    }
+
     fun capabilities(): List<AgentCapability> = AgentToolRegistry.forRuntime(
         localReady = local.isAvailable,
         cloudReady = allowCloud && cloud?.isAvailable == true,
