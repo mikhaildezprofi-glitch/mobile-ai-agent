@@ -1,0 +1,86 @@
+name: PocketPal Native Core ARM64 Check
+
+on:
+  push:
+    branches:
+      - 'feat/pocketpal-native-core-android-*'
+    paths:
+      - '.github/workflows/pocketpal-native-core.yml'
+      - 'docs/POCKETPAL_NATIVE_ENGINE_MIGRATION.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pocketpal-native-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-arm64-cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Jimmy repository
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned PocketPal llama.rn fork
+        uses: actions/checkout@v4
+        with:
+          repository: a-ghorbani/llama.rn
+          ref: ae0e55b7dacdb06d37843273204a3e7ff294a6a2
+          path: third_party/pocketpal-llama-rn
+          fetch-depth: 1
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install pinned Android NDK and CMake
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager "ndk;29.0.13113456" "cmake;3.31.6"
+
+      - name: Record engine source revision
+        shell: bash
+        run: |
+          git -C third_party/pocketpal-llama-rn rev-parse HEAD
+          test -f third_party/pocketpal-llama-rn/LICENSE
+          grep -q "MIT License" third_party/pocketpal-llama-rn/LICENSE
+
+      - name: Configure ARM64 CPU-only native core
+        shell: bash
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/29.0.13113456"
+          CMAKE="$ANDROID_HOME/cmake/3.31.6/bin/cmake"
+          "$CMAKE" \
+            -S third_party/pocketpal-llama-rn/android/src/main/rnllama \
+            -B build/pocketpal-arm64 \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-33 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DRNLLAMA_ANDROID_VARIANTS=rnllama
+
+      - name: Build native core
+        run: |
+          "$ANDROID_HOME/cmake/3.31.6/bin/cmake" --build build/pocketpal-arm64 --target rnllama --parallel 2
+
+      - name: Verify ARM64 shared library
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIB="build/pocketpal-arm64/librnllama.so"
+          test -s "$LIB"
+          "$ANDROID_HOME/ndk/29.0.13113456/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h "$LIB" | grep -E "Class:.*ELF64|Machine:.*AArch64"
+          sha256sum "$LIB"
+
+      - name: Upload native core artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketpal-rnllama-arm64-cpu
+          path: build/pocketpal-arm64/librnllama.so
+          if-no-files-found: error
+          retention-days: 7
