@@ -66,5 +66,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     testImplementation("junit:junit:4.13.2")
+    // Android's mockable android.jar ships org.json stubs that throw at runtime
+    // in local JVM tests. Use the real JSON implementation only on the test classpath.
+    testImplementation("org.json:json:20240303")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
