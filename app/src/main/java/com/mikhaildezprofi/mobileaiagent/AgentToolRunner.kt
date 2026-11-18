@@ -60,8 +60,10 @@ class AgentToolRunner(
             val result = registry.execute(invocation)
             calls++
             toolResults += "Вызов $calls: ${invocation.name}\nРезультат: $result"
+            emit("\n[Локальный инструмент: ${invocation.name} выполнен]\n")
             currentPrompt = AgentToolProtocol.continuation(prompt, toolResults) +
-                "\n\nЕсли данных достаточно, дай окончательный ответ обычным текстом. Если нужен ещё один инструмент, верни JSON по заданному протоколу."
+                "\n\n" + AgentToolProtocol.instructions(registry) +
+                "\n\nЕсли данных достаточно, дай окончательный ответ обычным текстом. Если нужен ещё один инструмент, верни JSON по указанному протоколу."
         }
     }
 
