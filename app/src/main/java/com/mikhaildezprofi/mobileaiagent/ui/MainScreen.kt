@@ -638,14 +638,15 @@ fun MainScreen() {
                     destination
                 }
 
-                val activeEngine = engine ?: error("Движок ещё не инициализирован")
+                val activeEngine = engine
                 val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
                 if (isProjector) {
-                    val vision = activeEngine as? VisionInferenceEngine
+                    val legacyEngine = activeEngine ?: error("Vision-движок недоступен.")
+                    val vision = legacyEngine as? VisionInferenceEngine
                         ?: error("Текущий движок не поддерживает мультимодальную обработку.")
                     status = "Загрузка vision-проектора…"
                     withContext(Dispatchers.IO) {
-                        check(activeEngine.state.value is InferenceEngine.State.ModelReady) {
+                        check(legacyEngine.state.value is InferenceEngine.State.ModelReady) {
                             "Сначала загрузите совместимую vision-модель, затем выберите mmproj."
                         }
                         vision.loadVisionProjector(modelFile.absolutePath)
@@ -658,18 +659,19 @@ fun MainScreen() {
                     val isVisionModel = modelFile.name.contains("SmolVLM", ignoreCase = true)
                     var projectorLoaded = false
                     if (isVisionModel) {
+                        val legacyEngine = activeEngine ?: error("Vision-движок недоступен.")
                         status = "Загрузка Vision-модели в отдельный движок…"
                         withContext(Dispatchers.IO) {
-                            if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
-                                activeEngine.state.value is InferenceEngine.State.Error
-                            ) activeEngine.cleanUp()
-                            activeEngine.loadModel(modelFile.absolutePath)
-                            if (systemPrompt.isNotBlank()) activeEngine.setSystemPrompt(systemPrompt)
+                            if (legacyEngine.state.value is InferenceEngine.State.ModelReady ||
+                                legacyEngine.state.value is InferenceEngine.State.Error
+                            ) legacyEngine.cleanUp()
+                            legacyEngine.loadModel(modelFile.absolutePath)
+                            if (systemPrompt.isNotBlank()) legacyEngine.setSystemPrompt(systemPrompt)
                             val expectedProjector = File(modelFile.parentFile, "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf")
                             val savedProjector = preferences.getString("vision_mmproj_path", null)?.let { File(it) }
                             val projector = listOfNotNull(savedProjector, expectedProjector)
                                 .firstOrNull { it.isFile && it.canRead() && it.length() > 0L }
-                            val vision = activeEngine as? VisionInferenceEngine
+                            val vision = legacyEngine as? VisionInferenceEngine
                             if (projector != null && vision != null) {
                                 vision.loadVisionProjector(projector.absolutePath)
                                 preferences.edit().putString("vision_mmproj_path", projector.absolutePath).apply()
@@ -678,16 +680,18 @@ fun MainScreen() {
                         }
                     } else {
                         status = "Модель сохранена. PocketPal загрузит её при первом запросе…"
-                        withContext(Dispatchers.IO) {
-                            if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
-                                activeEngine.state.value is InferenceEngine.State.Error
-                            ) activeEngine.cleanUp()
+                        if (activeEngine != null) {
+                            withContext(Dispatchers.IO) {
+                                if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
+                                    activeEngine.state.value is InferenceEngine.State.Error
+                                ) activeEngine.cleanUp()
+                            }
                         }
                     }
                     preferences.edit().putString("model_path", modelFile.absolutePath).apply()
                     visionRevision++
                     modelReady = if (isVisionModel) {
-                        activeEngine.state.value is InferenceEngine.State.ModelReady
+                        activeEngine?.state?.value is InferenceEngine.State.ModelReady
                     } else {
                         modelFile.isFile && modelFile.canRead() && modelFile.length() > 0L
                     }
