@@ -10,8 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
-#include <codecvt>
-#include <locale>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -40,9 +39,69 @@ std::string fromJavaString(JNIEnv * env, jstring value) {
     return result;
 }
 
+std::u16string utf8ToUtf16(const std::string & value) {
+    std::u16string output;
+    output.reserve(value.size());
+
+    for (size_t index = 0; index < value.size();) {
+        const auto lead = static_cast<uint8_t>(value[index]);
+        uint32_t codePoint = 0;
+        size_t length = 0;
+
+        if (lead <= 0x7f) {
+            codePoint = lead;
+            length = 1;
+        } else if ((lead & 0xe0) == 0xc0) {
+            codePoint = lead & 0x1f;
+            length = 2;
+        } else if ((lead & 0xf0) == 0xe0) {
+            codePoint = lead & 0x0f;
+            length = 3;
+        } else if ((lead & 0xf8) == 0xf0) {
+            codePoint = lead & 0x07;
+            length = 4;
+        } else {
+            output.push_back(u'\\ufffd');
+            ++index;
+            continue;
+        }
+
+        bool valid = index + length <= value.size();
+        for (size_t offset = 1; valid && offset < length; ++offset) {
+            const auto continuation = static_cast<uint8_t>(value[index + offset]);
+            if ((continuation & 0xc0) != 0x80) {
+                valid = false;
+                break;
+            }
+            codePoint = (codePoint << 6) | (continuation & 0x3f);
+        }
+
+        const bool overlong =
+            (length == 2 && codePoint < 0x80) ||
+            (length == 3 && codePoint < 0x800) ||
+            (length == 4 && codePoint < 0x10000);
+        if (!valid || overlong || codePoint > 0x10ffff ||
+            (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+            output.push_back(u'\\ufffd');
+            ++index;
+            continue;
+        }
+
+        if (codePoint <= 0xffff) {
+            output.push_back(static_cast<char16_t>(codePoint));
+        } else {
+            codePoint -= 0x10000;
+            output.push_back(static_cast<char16_t>(0xd800 + (codePoint >> 10)));
+            output.push_back(static_cast<char16_t>(0xdc00 + (codePoint & 0x3ff)));
+        }
+        index += length;
+    }
+
+    return output;
+}
+
 jstring toJavaString(JNIEnv * env, const std::string & value) {
-    std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> converter;
-    const std::u16string utf16 = converter.from_bytes(value);
+    const std::u16string utf16 = utf8ToUtf16(value);
     return env->NewString(
         reinterpret_cast<const jchar *>(utf16.data()),
         static_cast<jsize>(utf16.size()));
