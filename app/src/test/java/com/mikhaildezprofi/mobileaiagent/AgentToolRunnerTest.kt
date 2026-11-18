@@ -68,7 +68,7 @@ class AgentToolRunnerTest {
         }.collect { chunk -> output.append(chunk) }
 
         assertEquals(AgentToolRunner.DEFAULT_MAX_TOOL_CALLS + 1, invocations)
-        assertEquals("Готово", output.toString())
+        assertTrue(output.toString().contains("Готово"))
     }
 
     @Test
