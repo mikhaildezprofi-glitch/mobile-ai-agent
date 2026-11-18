@@ -33,5 +33,5 @@ Historical refs are intentionally retained for audit and rollback. They are not 
 
 - Do not run the APK build workflow during feature development.
 - Use the unit-test-only workflow for JVM regression checks.
-- The PocketPal ARM64 native-core workflow is manual-only; an earlier isolated ARM64 CPU build succeeded and produced the `pocketpal-rnllama-arm64-cpu` artifact.
+- The PocketPal ARM64 native-core workflow builds only native `.so` files (never an APK). It successfully compiled `librnllama.so` and `libjimmy_pocketpal_jni.so` as ELF64/AArch64 and uploaded the `pocketpal-rnllama-arm64-cpu` artifact.
 - Create the final PR and run the APK build only after native JNI/Kotlin integration and the remaining additions are complete.
