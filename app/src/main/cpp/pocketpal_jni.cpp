@@ -61,7 +61,7 @@ std::u16string utf8ToUtf16(const std::string & value) {
             codePoint = lead & 0x07;
             length = 4;
         } else {
-            output.push_back(u'\\ufffd');
+            output.push_back(u'\ufffd');
             ++index;
             continue;
         }
@@ -82,7 +82,7 @@ std::u16string utf8ToUtf16(const std::string & value) {
             (length == 4 && codePoint < 0x10000);
         if (!valid || overlong || codePoint > 0x10ffff ||
             (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
-            output.push_back(u'\\ufffd');
+            output.push_back(u'\ufffd');
             ++index;
             continue;
         }
