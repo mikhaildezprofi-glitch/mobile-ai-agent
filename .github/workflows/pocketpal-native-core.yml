@@ -88,6 +88,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pocketpal-rnllama-arm64-cpu
-          path: build/pocketpal-arm64/librnllama.so
+          path: |
+            build/pocketpal-arm64/pocketpal-rnllama/librnllama.so
+            build/pocketpal-arm64/libjimmy_pocketpal_jni.so
           if-no-files-found: error
           retention-days: 7
