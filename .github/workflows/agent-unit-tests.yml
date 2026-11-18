@@ -1,0 +1,72 @@
+name: Agent Consolidated Unit Tests
+
+on:
+  push:
+    branches:
+      - 'integration/agent-consolidated-*'
+    paths:
+      - 'app/**'
+      - 'llama/**'
+      - 'gradle/**'
+      - 'third_party/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradlew'
+      - 'scripts/patch-llama-diagnostics.py'
+      - '.github/workflows/agent-unit-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-unit-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Jimmy repository
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned llama.cpp Android engine
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 3de52ac38818978d6da8f386eda43a856e53714a
+          path: third_party/llama.cpp
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK, NDK and CMake
+        run: |
+          set +e
+          yes | sdkmanager --licenses
+          sdk_status=${PIPESTATUS[1]}
+          set -e
+          if [ "$sdk_status" -ne 0 ]; then exit "$sdk_status"; fi
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.13113456" "cmake;3.31.6"
+          sed -i 's/listOf("arm64-v8a", "x86_64")/listOf("arm64-v8a")/' third_party/llama.cpp/examples/llama.android/lib/build.gradle.kts
+
+      - name: Patch llama.cpp native diagnostics
+        run: python3 scripts/patch-llama-diagnostics.py
+
+      - name: Run unit tests only
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
