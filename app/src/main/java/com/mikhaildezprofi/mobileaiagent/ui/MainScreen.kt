@@ -521,6 +521,14 @@ fun MainScreen() {
     }
 
     LaunchedEffect(appContext) {
+        val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+        val savedModelPath = preferences.getString("model_path", null)
+        val preferredModel = savedModelPath?.let { File(it) }
+        val fallbackModel = File(appContext.filesDir, "models/Qwen3-1.7B-Q4_K_M.gguf")
+        val savedModel = listOfNotNull(preferredModel, fallbackModel)
+            .firstOrNull { it.isFile && it.canRead() && it.length() > 0L }
+        val isSavedVisionModel = savedModel?.name?.contains("SmolVLM", ignoreCase = true) == true
+
         try {
             val instance = withContext(Dispatchers.IO) {
                 AiChat.getInferenceEngine(appContext)
@@ -531,61 +539,63 @@ fun MainScreen() {
                     it !is InferenceEngine.State.Initializing
                 }
             }
-            if (initialState is InferenceEngine.State.Error) {
-                throw initialState.exception
-            }
             engine = instance
-            if (initialState is InferenceEngine.State.ModelReady) {
-                modelReady = true
-                status = "Локальная модель уже загружена."
-            } else {
-                val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
-                val savedModelPath = preferences.getString("model_path", null)
-                val preferredModel = savedModelPath?.let { File(it) }
-                // The preference can be absent after a settings reset while the copied
-                // model is still safely stored in the app's private models directory.
-                val fallbackModel = File(appContext.filesDir, "models/Qwen3-1.7B-Q4_K_M.gguf")
-                val savedModel = listOfNotNull(preferredModel, fallbackModel)
-                    .firstOrNull { it.isFile && it.canRead() && it.length() > 0L }
-                if (initialState is InferenceEngine.State.Initialized && savedModel != null) {
-                    status = "Восстановление локальной модели…"
-                    withContext(Dispatchers.IO) {
-                        instance.loadModel(savedModel.absolutePath)
-                        if (systemPrompt.isNotBlank()) instance.setSystemPrompt(systemPrompt)
-                        if (savedModel.name.contains("SmolVLM", ignoreCase = true)) {
-                            val savedProjector = preferences.getString("vision_mmproj_path", null)?.let { File(it) }
-                            val expectedProjector = File(savedModel.parentFile, "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf")
-                            val projector = listOfNotNull(savedProjector, expectedProjector)
-                                .firstOrNull { it.isFile && it.canRead() && it.length() > 0L }
-                            val vision = instance as? VisionInferenceEngine
-                            if (projector != null && vision != null) {
-                                vision.loadVisionProjector(projector.absolutePath)
-                            }
-                        }
+
+            if (isSavedVisionModel && savedModel != null) {
+                check(initialState !is InferenceEngine.State.Error) {
+                    "Legacy Vision engine initialization failed: ${(initialState as InferenceEngine.State.Error).exception.message}"
+                }
+                status = "Восстановление Vision-модели…"
+                withContext(Dispatchers.IO) {
+                    if (instance.state.value is InferenceEngine.State.ModelReady) instance.cleanUp()
+                    instance.loadModel(savedModel.absolutePath)
+                    if (systemPrompt.isNotBlank()) instance.setSystemPrompt(systemPrompt)
+                    val savedProjector = preferences.getString("vision_mmproj_path", null)?.let { File(it) }
+                    val expectedProjector = File(savedModel.parentFile, "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf")
+                    val projector = listOfNotNull(savedProjector, expectedProjector)
+                        .firstOrNull { it.isFile && it.canRead() && it.length() > 0L }
+                    if (projector != null) {
+                        val vision = instance as? VisionInferenceEngine
+                            ?: error("Legacy engine does not support Vision.")
+                        vision.loadVisionProjector(projector.absolutePath)
+                        preferences.edit().putString("vision_mmproj_path", projector.absolutePath).apply()
                     }
-                    preferences.edit().putString("model_path", savedModel.absolutePath).commit()
-                    modelReady = instance.state.value is InferenceEngine.State.ModelReady
-                    status = if (modelReady) {
-                        "Локальная модель восстановлена. Можно общаться офлайн."
-                    } else {
-                        "Модель найдена, но движок не подтвердил готовность. Проверьте диагностику."
-                    }
+                }
+                modelReady = instance.state.value is InferenceEngine.State.ModelReady
+                status = if (modelReady) {
+                    "Vision-модель восстановлена. Текстовые запросы выполняет PocketPal."
                 } else {
-                    status = if (savedModel == null) {
-                        "Движок готов. Сохранённая модель не найдена — выберите GGUF."
-                    } else {
-                        "Движок ещё не готов к восстановлению модели."
-                    }
+                    "Vision-модель найдена, но движок не подтвердил готовность."
+                }
+            } else {
+                // PocketPal is the sole text engine. Unload any model retained by the
+                // previous llama.cpp implementation to prevent duplicate RAM usage.
+                withContext(Dispatchers.IO) {
+                    if (instance.state.value is InferenceEngine.State.ModelReady) instance.cleanUp()
+                }
+                modelReady = savedModel != null
+                status = if (modelReady) {
+                    "PocketPal готов. Локальная модель будет загружена при первом запросе."
+                } else {
+                    "PocketPal готов. Выберите GGUF-модель для локальной работы."
                 }
             }
         } catch (error: LinkageError) {
             engine = null
-            modelReady = false
-            status = "Нативный движок недоступен: ${error.message ?: error.javaClass.simpleName}. Гибридный режим остаётся доступен."
+            modelReady = savedModel != null && !isSavedVisionModel
+            status = if (modelReady) {
+                "PocketPal готов. Старый Vision-модуль недоступен: ${error.message ?: error.javaClass.simpleName}"
+            } else {
+                "PocketPal готов. Выберите GGUF-модель. Vision-модуль недоступен."
+            }
         } catch (error: Exception) {
             engine = null
-            modelReady = false
-            status = "Ошибка инициализации: ${error.message ?: error.javaClass.simpleName}. Гибридный режим остаётся доступен."
+            modelReady = savedModel != null && !isSavedVisionModel
+            status = if (modelReady) {
+                "PocketPal готов. Старый Vision-модуль отключён: ${error.message ?: error.javaClass.simpleName}"
+            } else {
+                "PocketPal готов. Не удалось восстановить Vision-модуль или найти GGUF: ${error.message ?: error.javaClass.simpleName}"
+            }
         }
     }
 
