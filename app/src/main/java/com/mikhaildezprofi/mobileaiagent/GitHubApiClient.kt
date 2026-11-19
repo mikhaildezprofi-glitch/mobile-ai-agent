@@ -60,14 +60,10 @@ class GitHubApiException(
  * Call from Dispatchers.IO; methods are synchronous by design.
  */
 class GitHubApiClient(
-    private val tokenStore: GitHubTokenStore,
-    private val owner: String = DEFAULT_OWNER,
-    private val repository: String = DEFAULT_REPOSITORY
+    private val tokenStore: GitHubTokenStore
 ) {
-    init {
-        require(owner.matches(Regex("[A-Za-z0-9_.-]{1,100}")))
-        require(repository.matches(Regex("[A-Za-z0-9_.-]{1,100}")))
-    }
+    private val owner = DEFAULT_OWNER
+    private val repository = DEFAULT_REPOSITORY
 
     fun validateConnection(): GitHubRepositoryInfo {
         val json = request("GET", "/repos/$owner/$repository")
