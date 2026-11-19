@@ -321,7 +321,9 @@ class AgentCoordinator(
         val saved = store.loadPlan(planId)
             ?: throw IllegalArgumentException("Сохранённый план не найден: $planId")
         saved.steps.filter { it.status != AgentStepStatus.COMPLETED }.forEach { step ->
-            store.setStepStatus(planId, step.step.id, AgentStepStatus.PENDING)
+            // Keep interrupted retry checkpoints; an explicit resume after FAILED starts a fresh retry cycle.
+            val checkpoint = if (step.status == AgentStepStatus.RUNNING) step.error else null
+            store.setStepStatus(planId, step.step.id, AgentStepStatus.PENDING, checkpoint)
         }
         store.setPlanStatus(planId, AgentPlanStatus.RUNNING)
         emitAll(executePlan(saved.plan, maxTokensPerStep, hybridMode, routing, systemPrompt, temperature))
@@ -339,6 +341,7 @@ class AgentCoordinator(
         taskStore?.savePlan(plan)
         taskStore?.setPlanStatus(plan.id, AgentPlanStatus.RUNNING)
         var activeStepId: String? = null
+        var activeAttempt = 1
         try {
             planExecutionMutex.withLock {
                 emit(AgentTaskEvent.PlanStarted(plan))
@@ -371,9 +374,14 @@ class AgentCoordinator(
                         append("Выполни только это задание. Не утверждай, что внешние действия выполнены, если они не запускались и не проверялись.")
                     }
                     var completed = ""
-                    var attempt = 1
-                    var lastError: Exception? = null
+                    val persistedCheckpoint = saved?.steps?.firstOrNull { it.step.id == step.id }
+                        ?.error?.let { Regex("^Попытка (\\d+)/\\d+: (.*)$").find(it) }
+                    var attempt = (persistedCheckpoint?.groupValues?.get(1)?.toIntOrNull()?.plus(1) ?: 1)
+                        .coerceAtLeast(1)
+                    var lastError: Exception? = persistedCheckpoint?.groupValues?.get(2)
+                        ?.takeIf(String::isNotBlank)?.let(::IllegalStateException)
                     while (attempt <= retryPolicy.maxAttempts) {
+                        activeAttempt = attempt
                         val attemptPrompt = if (lastError == null) stepPrompt else {
                             retryPolicy.buildCorrectionPrompt(stepPrompt, attempt - 1, lastError!!)
                         }
@@ -394,9 +402,7 @@ class AgentCoordinator(
                             attempt += 1
                         }
                     }
-                    completed.lineSequence().forEach { line ->
-                        emit(AgentTaskEvent.StepOutput(step.id, "$line\n"))
-                    }
+                    emit(AgentTaskEvent.StepOutput(step.id, completed))
                     results[step.id] = completed
                     taskStore?.completeStep(plan.id, step.id, completed)
                     activeStepId = null
@@ -410,7 +416,12 @@ class AgentCoordinator(
             taskStore?.setPlanStatus(plan.id, AgentPlanStatus.PAUSED)
             throw cancelled
         } catch (error: Exception) {
-            activeStepId?.let { taskStore?.setStepStatus(plan.id, it, AgentStepStatus.FAILED, error.message) }
+            activeStepId?.let {
+                taskStore?.setStepStatus(
+                    plan.id, it, AgentStepStatus.FAILED,
+                    "Попытка $activeAttempt/${retryPolicy.maxAttempts}: ${error.message ?: error.javaClass.simpleName}".take(1_200)
+                )
+            }
             taskStore?.setPlanStatus(plan.id, AgentPlanStatus.FAILED)
             throw error
         }
