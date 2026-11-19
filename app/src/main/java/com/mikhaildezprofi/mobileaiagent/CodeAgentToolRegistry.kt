@@ -16,6 +16,7 @@ internal class CodeAgentToolRegistry(private val workspace: CodeWorkspace) {
                 .put("directory", stringProperty("Relative directory; empty means workspace root"))
                 .put("max_depth", integerProperty("Maximum recursion depth, 0 to 8"))
                 .put("max_files", integerProperty("Maximum entries, 1 to 500")))
+                .put("additionalProperties", false)
         ))
         put(tool(
             "code_read_file",
