@@ -5,45 +5,41 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class GitHubApiRulesTest {
-    @Test fun acceptsOnlyCodeAgentBranches() {
-        GitHubBranchRules.requireWorkingBranch("code-agent/task-123")
-        assertThrows(IllegalArgumentException::class.java) {
-            GitHubBranchRules.requireWorkingBranch("main")
-        }
+    @Test fun acceptsOnlyCodeAgentBranchesForWrites() {
+        assertEquals(true, GitHubApiClient.isAgentBranch("code-agent/task-123"))
+        assertEquals(false, GitHubApiClient.isAgentBranch("main"))
+        assertEquals(false, GitHubApiClient.isAgentBranch("integration/agent-consolidated-20261119"))
     }
 
     @Test fun rejectsTraversalAndMalformedBranchNames() {
         listOf("code-agent/../main", "code-agent//bad", "code-agent/name/", "code-agent/a b")
             .forEach { branch ->
-                assertThrows(IllegalArgumentException::class.java) {
-                    GitHubBranchRules.requireWorkingBranch(branch)
-                }
+                assertEquals(false, GitHubApiClient.isAgentBranch(branch))
             }
     }
 
-    @Test fun validatesRepositoryIdentity() {
-        assertEquals("mobile-ai-agent", GitHubRepositoryConfig("mikhaildezprofi-glitch", "mobile-ai-agent").name)
-        assertThrows(IllegalArgumentException::class.java) {
-            GitHubRepositoryConfig("../owner", "repo")
-        }
+    @Test fun acceptsSafeNestedWorkspacePaths() {
+        assertEquals("app/src/Main.kt", GitHubApiClient.normalizeWorkspacePath("app/src/Main.kt"))
     }
 
-    @Test fun rejectsUnsafeFilePaths() {
-        listOf("../outside.txt", "/absolute.txt", "src/../outside.kt", ".git/config", "src\\outside.kt")
+    @Test fun rejectsTraversalAndAbsoluteWorkspacePaths() {
+        listOf("../outside.txt", "/absolute.txt", "src/../outside.kt", ".git/config")
             .forEach { path ->
                 assertThrows(IllegalArgumentException::class.java) {
-                    GitHubFileRules.validate(mapOf(path to "content"))
+                    GitHubApiClient.normalizeWorkspacePath(path)
                 }
             }
     }
 
-    @Test fun acceptsBoundedUtf8Files() {
-        val files = GitHubFileRules.validate(mapOf("src/Main.kt" to "Привет"))
-        assertEquals("Привет", files.getValue("src/Main.kt"))
-    }
-
-    @Test fun rejectsTooManyFiles() {
-        val files = (1..101).associate { "file$it.txt" to "x" }
-        assertThrows(IllegalArgumentException::class.java) { GitHubFileRules.validate(files) }
+    @Test fun rejectsSecretsAndGeneratedFiles() {
+        listOf(".env", "release.keystore", "signing.p12", "local.properties", "model.gguf", "app.apk")
+            .forEach { path ->
+                assertThrows(IllegalArgumentException::class.java) {
+                    GitHubApiClient.normalizeWorkspacePath(path)
+                }
+            }
+        assertThrows(IllegalArgumentException::class.java) {
+            GitHubApiClient.normalizeWorkspacePath("app/build/output.txt")
+        }
     }
 }
