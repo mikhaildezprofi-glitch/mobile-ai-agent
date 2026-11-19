@@ -106,7 +106,10 @@ internal object CodeProjectArchive {
         var totalBytes = 0L
         ZipOutputStream(output.buffered()).use { zip ->
             project.walkTopDown()
-                .onEnter { directory -> directory == project || directory.name !in EXCLUDED_DIRECTORIES }
+                .onEnter { directory ->
+                    directory == project ||
+                        (directory.name !in EXCLUDED_DIRECTORIES && !directory.name.startsWith(".jimmy-"))
+                }
                 .forEach { file ->
                 if (file.isDirectory) {
                     if (file != project && file.name in EXCLUDED_DIRECTORIES) return@forEach
@@ -139,7 +142,8 @@ internal object CodeProjectArchive {
     }
 
     private fun normalizeEntryName(name: String): String {
-        require(name.isNotBlank() && !name.startsWith("/") && !name.startsWith("\\")) {
+        require(name.isNotBlank() && name.indexOf('\u0000') < 0 &&
+            !name.startsWith("/") && !name.startsWith("\\")) {
             "Архив содержит абсолютный путь."
         }
         val normalized = name.replace('\\', '/')
