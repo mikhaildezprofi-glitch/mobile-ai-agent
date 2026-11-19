@@ -616,69 +616,42 @@ fun MainScreen() {
                 val activeEngine = engine
                 val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
                 if (isProjector) {
-                    val legacyEngine = activeEngine ?: error("Vision-движок недоступен.")
-                    val vision = legacyEngine as? VisionInferenceEngine
-                        ?: error("Текущий движок не поддерживает мультимодальную обработку.")
-                    status = "Загрузка vision-проектора…"
-                    withContext(Dispatchers.IO) {
-                        check(legacyEngine.state.value is InferenceEngine.State.ModelReady) {
-                            "Сначала загрузите совместимую vision-модель, затем выберите mmproj."
-                        }
-                        vision.loadVisionProjector(modelFile.absolutePath)
+                    val selectedVision = preferences.getString("vision_model_path", null)?.let { File(it) }
+                        ?: preferences.getString("model_path", null)?.let { File(it) }
+                    check(selectedVision?.isFile == true &&
+                        selectedVision.name.contains("SmolVLM", ignoreCase = true)) {
+                        "Сначала выберите совместимую SmolVLM-модель, затем её mmproj."
                     }
                     preferences.edit().putString("vision_mmproj_path", modelFile.absolutePath).apply()
                     visionRevision++
-                    modelReady = true
-                    status = "Vision-проектор загружен. Локальный анализ фото включён."
+                    modelReady = selectedVision.isFile && selectedVision.canRead()
+                    visionReady = modelReady
+                    status = "Vision-проектор сохранён. PocketPal загрузит его вместе со SmolVLM при анализе фото."
                 } else {
                     val isVisionModel = modelFile.name.contains("SmolVLM", ignoreCase = true)
+                    val modelEditor = preferences.edit().putString("model_path", modelFile.absolutePath)
                     var projectorLoaded = false
                     if (isVisionModel) {
-                        val legacyEngine = activeEngine ?: error("Vision-движок недоступен.")
-                        status = "Загрузка Vision-модели в отдельный движок…"
-                        withContext(Dispatchers.IO) {
-                            if (legacyEngine.state.value is InferenceEngine.State.ModelReady ||
-                                legacyEngine.state.value is InferenceEngine.State.Error
-                            ) legacyEngine.cleanUp()
-                            legacyEngine.loadModel(modelFile.absolutePath)
-                            if (systemPrompt.isNotBlank()) legacyEngine.setSystemPrompt(systemPrompt)
-                            val expectedProjector = File(modelFile.parentFile, "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf")
-                            val savedProjector = preferences.getString("vision_mmproj_path", null)?.let { File(it) }
-                            val projector = listOfNotNull(savedProjector, expectedProjector)
-                                .firstOrNull { it.isFile && it.canRead() && it.length() > 0L }
-                            val vision = legacyEngine as? VisionInferenceEngine
-                            if (projector != null && vision != null) {
-                                vision.loadVisionProjector(projector.absolutePath)
-                                preferences.edit().putString("vision_mmproj_path", projector.absolutePath).apply()
-                                projectorLoaded = true
-                            }
+                        modelEditor.putString("vision_model_path", modelFile.absolutePath)
+                        val expectedProjector = File(modelFile.parentFile, VisionModelAssets.PROJECTOR_FILE)
+                        val savedProjector = preferences.getString("vision_mmproj_path", null)?.let { File(it) }
+                        val projector = listOfNotNull(savedProjector, expectedProjector)
+                            .firstOrNull { it.isFile && it.canRead() && it.length() > 0L }
+                        if (projector != null) {
+                            modelEditor.putString("vision_mmproj_path", projector.absolutePath)
+                            projectorLoaded = true
                         }
                     } else {
-                        status = "Модель сохранена. PocketPal загрузит её при первом запросе…"
-                        if (activeEngine != null) {
-                            withContext(Dispatchers.IO) {
-                                if (activeEngine.state.value is InferenceEngine.State.ModelReady ||
-                                    activeEngine.state.value is InferenceEngine.State.Error
-                                ) activeEngine.cleanUp()
-                            }
-                        }
-                    }
-                    val modelEditor = preferences.edit()
-                        .putString("model_path", modelFile.absolutePath)
-                    if (!isVisionModel) {
                         modelEditor.putString("text_model_path", modelFile.absolutePath)
                     }
                     modelEditor.apply()
                     visionRevision++
-                    modelReady = if (isVisionModel) {
-                        activeEngine?.state?.value is InferenceEngine.State.ModelReady
-                    } else {
-                        modelFile.isFile && modelFile.canRead() && modelFile.length() > 0L
-                    }
-                    status = if (projectorLoaded) {
-                        "SmolVLM загружена вместе с vision-проектором. Анализ фото включён."
+                    modelReady = modelFile.isFile && modelFile.canRead() && modelFile.length() > 0L
+                    visionReady = isVisionModel && projectorLoaded
+                    status = if (isVisionModel && projectorLoaded) {
+                        "SmolVLM и mmproj выбраны. PocketPal загрузит их при анализе изображения."
                     } else if (isVisionModel) {
-                        "SmolVLM загружена. Для анализа фото требуется совместимый mmproj."
+                        "SmolVLM выбрана. Выберите совместимый mmproj для анализа изображений."
                     } else {
                         "Модель ${selectedName} выбрана для PocketPal. Она загрузится при первом запросе."
                     }
