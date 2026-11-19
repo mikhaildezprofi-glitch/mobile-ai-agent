@@ -136,9 +136,9 @@ class GitHubApiClientTest {
         )
 
         assertEquals(1, result.changedFiles)
-        assertTrue(requests[2].sentBody.contains("\\"path\\":\\"obsolete.kt\\""))
-        assertTrue(requests[2].sentBody.contains("\\"sha\\":null"))
-        assertTrue(requests[2].sentBody.contains("\\"type\\":\\"blob\\""))
+        assertTrue(requests[2].sentBody.contains("\"path\":\"obsolete.kt\""))
+        assertTrue(requests[2].sentBody.contains("\"sha\":null"))
+        assertTrue(requests[2].sentBody.contains("\"type\":\"blob\""))
     }
 
     @Test
