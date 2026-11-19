@@ -274,7 +274,7 @@ class GitHubApiClient(
         }
     }
 
-    private fun extractJobLogArchive(archive: ByteArray): String {
+    internal fun extractJobLogArchive(archive: ByteArray): String {
         val output = StringBuilder()
         ZipInputStream(ByteArrayInputStream(archive)).use { zip ->
             var entries = 0
