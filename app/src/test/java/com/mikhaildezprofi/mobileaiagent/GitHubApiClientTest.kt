@@ -22,6 +22,9 @@ class GitHubApiClientTest {
         private val body: String
     ) : HttpURLConnection(url) {
         val headers = mutableMapOf<String, String>()
+        private val output = ByteArrayOutputStream()
+        val sentBody: String get() = output.toString("UTF-8")
+        override fun getOutputStream() = output
         override fun connect() {}
         override fun disconnect() {}
         override fun usingProxy() = false
@@ -106,6 +109,36 @@ class GitHubApiClientTest {
         assertTrue(extracted.contains("../outside.txt"))
         assertTrue(extracted.contains("log line"))
         assertTrue(extracted.contains("second line"))
+    }
+
+    @Test
+    fun commitsDeletionAsNullShaTreeEntryOnlyAfterExplicitInput() {
+        val responses = ArrayDeque(
+            listOf(
+                """{"object":{"sha":"${"a".repeat(40)}"}}""",
+                """{"tree":{"sha":"base-tree"}}""",
+                """{"sha":"new-tree"}""",
+                """{"sha":"${"b".repeat(40)}"}""",
+                """{"ref":"refs/heads/code-agent/test"}"""
+            )
+        )
+        val requests = mutableListOf<Response>()
+        val client = GitHubApiClient(Token()) { url ->
+            Response(url, 200, responses.removeFirst()).also { requests += it }
+        }
+
+        val result = client.commitWorkspaceChanges(
+            branch = "code-agent/test",
+            expectedHeadSha = "a".repeat(40),
+            files = emptyList(),
+            message = "remove obsolete file",
+            deletePaths = listOf("obsolete.kt")
+        )
+
+        assertEquals(1, result.changedFiles)
+        assertTrue(requests[2].sentBody.contains("\\"path\\":\\"obsolete.kt\\""))
+        assertTrue(requests[2].sentBody.contains("\\"sha\\":null"))
+        assertTrue(requests[2].sentBody.contains("\\"type\\":\\"blob\\""))
     }
 
     @Test
