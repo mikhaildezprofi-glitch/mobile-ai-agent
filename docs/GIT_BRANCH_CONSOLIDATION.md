@@ -42,6 +42,7 @@ Other branches such as `agent-queue`, `feature/hourly-device-watchdog` and `clou
 
 - Do not run the APK build workflow during feature development.
 - Use the unit-test-only workflow for JVM regression checks.
-- The PocketPal ARM64 native-core workflow builds only native shared libraries, never an APK. Latest run `44459127147` passed and uploaded `pocketpal-rnllama-arm64-cpu` (41,578,392 bytes); `librnllama.so` and `libjimmy_pocketpal_jni.so` were verified as ELF64/AArch64.
+- The PocketPal ARM64 native-core workflow builds only native shared libraries, never an APK. Latest MTMD-enabled run `44461202705` passed and uploaded `pocketpal-rnllama-arm64-cpu` (41,641,838 bytes); both `librnllama.so` and `libjimmy_pocketpal_jni.so` were verified as ELF64/AArch64.
 - Unit-test run `44406966524` passed after the process-wide provider change; run `44407449547` passed the subsequent UI/provider changes. Structured tool-runner regression tests passed in unit-test run `44459350163` after fixing the multi-call rejection assertion, generation-interface override and persistent text-model selection.
+- The legacy `:llama` Gradle subproject, its app dependency, old llama.cpp CI checkout and diagnostics patch script were removed from the active build. The old source ref remains unbuilt as a rollback snapshot.
 - The final APK workflow should run once after the remaining additions, integration and checks are complete.
