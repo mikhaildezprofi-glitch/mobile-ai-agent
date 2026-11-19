@@ -24,13 +24,24 @@ internal data class PocketPalGenerationResult(
     val interrupted: Boolean
 )
 
+/** Injectable contract shared by the JNI bridge and deterministic runner tests. */
+internal interface PocketPalGenerationEngine {
+    override fun generate(
+        messages: JSONArray,
+        tools: JSONArray = JSONArray(),
+        maxTokens: Int = 1024,
+        temperature: Float = 0.7f,
+        listener: PocketPalSnapshotListener? = null
+    ): PocketPalGenerationResult
+}
+
 /**
  * Kotlin/JNI host adapter for PocketPal's native llama.rn core.
  *
  * This class deliberately does not depend on React Native, JSI, fbjni or the PocketPal UI.
  * It owns one native context and serializes model lifecycle and generation through JNI.
  */
-internal class PocketPalNativeBridge : AutoCloseable {
+internal class PocketPalNativeBridge : PocketPalGenerationEngine, AutoCloseable {
     private val lifecycleLock = Any()
     private var handle: Long
 
