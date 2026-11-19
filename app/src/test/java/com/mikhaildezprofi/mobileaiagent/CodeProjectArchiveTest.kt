@@ -52,7 +52,8 @@ class CodeProjectArchiveTest {
 
     @Test
     fun rejectsArchivePathTraversalAndCleansStagingDirectory() {
-        val archive = zipOf("../outside.txt" to "not allowed")
+        val outsideName = "jimmy-archive-escape-${root.name}.txt"
+        val archive = zipOf("../$outsideName" to "not allowed")
         var rejected = false
         try {
             CodeProjectArchive.importZip(workspace, "bad", ByteArrayInputStream(archive))
@@ -61,7 +62,7 @@ class CodeProjectArchiveTest {
         }
 
         assertTrue(rejected)
-        assertTrue(!java.io.File(root.parentFile, "outside.txt").exists())
+        assertTrue(!java.io.File(root.parentFile, outsideName).exists())
         assertTrue(root.listFiles().orEmpty().none { it.name.startsWith(".jimmy-import-") })
     }
 
