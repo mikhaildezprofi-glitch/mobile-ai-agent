@@ -282,8 +282,8 @@ class GitHubApiClient(
                 entries++
                 require(entries <= MAX_LOG_ENTRIES) { "В архиве слишком много файлов журналов." }
                 val bytes = readBoundedBytes(zip, MAX_LOG_ENTRY_BYTES)
-                if (output.isNotEmpty()) output.append('\\n')
-                output.append("===== ").append(entry.name.take(160)).append(" =====\\n")
+                if (output.isNotEmpty()) output.append('\n')
+                output.append("===== ").append(entry.name.take(160)).append(" =====\n")
                 output.append(bytes.toString(Charsets.UTF_8))
                 require(output.length <= MAX_LOG_TEXT_CHARS) { "Распакованный журнал превышает лимит." }
                 zip.closeEntry()
