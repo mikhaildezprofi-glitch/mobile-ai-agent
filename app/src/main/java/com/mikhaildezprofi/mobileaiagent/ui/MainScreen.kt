@@ -70,6 +70,7 @@ import com.mikhaildezprofi.mobileaiagent.CodeProjectArchive
 import com.mikhaildezprofi.mobileaiagent.CodeWorkspace
 import com.mikhaildezprofi.mobileaiagent.SafeDocumentReader
 import com.mikhaildezprofi.mobileaiagent.GeminiApiKeyStore
+import com.mikhaildezprofi.mobileaiagent.GitHubTokenStore
 import com.mikhaildezprofi.mobileaiagent.GeminiCloudProvider
 import com.mikhaildezprofi.mobileaiagent.InstalledGeminiBridge
 import com.mikhaildezprofi.mobileaiagent.AgentRuntimeConfig
@@ -287,6 +288,10 @@ fun MainScreen() {
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val geminiKeyStore = remember { GeminiApiKeyStore(appContext) }
+    val githubTokenStore = remember { GitHubTokenStore(appContext) }
+    var githubTokenDraft by remember { mutableStateOf("") }
+    var githubTokenConfigured by remember { mutableStateOf(githubTokenStore.hasToken()) }
+    var githubTokenStatus by remember { mutableStateOf(if (githubTokenStore.hasToken()) "GitHub-токен сохранён в Android Keystore." else "GitHub не подключён.") }
     var geminiAppInstalled by remember { mutableStateOf(InstalledGeminiBridge.isInstalled(appContext)) }
     var geminiAppStatus by remember { mutableStateOf("") }
     var geminiApiKeyDraft by remember { mutableStateOf("") }
@@ -1974,6 +1979,56 @@ fun MainScreen() {
                         Text(geminiTestStatus, style = MaterialTheme.typography.bodySmall)
                     }
                     Text("${runtimeConfig.geminiModelId} • бесплатный уровень при наличии квоты Google")
+                    HorizontalDivider()
+                    Text("GitHub Code Agent", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (githubTokenConfigured) "Токен сохранён в Android Keystore. Сам токен повторно не отображается."
+                        else "Токен не настроен. Для подключения используйте fine-grained personal access token.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = githubTokenDraft,
+                        onValueChange = { githubTokenDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("GitHub fine-grained token") },
+                        placeholder = { Text("Вставьте токен GitHub") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        supportingText = { Text("Минимальные права для этого репозитория: Contents Read and write; Actions Read and write. Metadata Read предоставляется автоматически. Не отправляйте токен в чат и не добавляйте его в Git.") }
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            enabled = githubTokenDraft.isNotBlank(),
+                            onClick = {
+                                val tokenToSave = githubTokenDraft
+                                scope.launch {
+                                    try {
+                                        withContext(Dispatchers.IO) { githubTokenStore.save(tokenToSave) }
+                                        githubTokenDraft = ""
+                                        githubTokenConfigured = true
+                                        githubTokenStatus = "GitHub-токен зашифрован и сохранён."
+                                        status = "GitHub-токен сохранён локально."
+                                    } catch (error: Exception) {
+                                        githubTokenStatus = "Не удалось сохранить токен: ${error.message ?: error.javaClass.simpleName}"
+                                    }
+                                }
+                            }
+                        ) { Text("Сохранить токен") }
+                        TextButton(
+                            enabled = githubTokenConfigured,
+                            onClick = {
+                                scope.launch {
+                                    withContext(Dispatchers.IO) { githubTokenStore.clear() }
+                                    githubTokenDraft = ""
+                                    githubTokenConfigured = false
+                                    githubTokenStatus = "GitHub-токен удалён с устройства."
+                                }
+                            }
+                        ) { Text("Удалить токен") }
+                    }
+                    Text(githubTokenStatus, style = MaterialTheme.typography.bodySmall)
                     HorizontalDivider()
                     Text("Установленное приложение Gemini", fontWeight = FontWeight.SemiBold)
                     Text(
