@@ -2,16 +2,34 @@
 
 ## Implemented in the integration branch
 
+### Credentials
 - A separate `GitHubTokenStore` encrypts a fine-grained personal access token with AES-256/GCM.
 - The encryption key is generated and retained by Android Keystore. Only ciphertext and the GCM IV are stored in a dedicated private preferences file.
-- GitHub credentials are isolated from Gemini credentials. Clearing the GitHub token does not clear Gemini settings.
-- The settings UI masks the token, clears the input after saving, supports deleting it, and can verify access to the configured repository.
-- `GitHubApiClient` is restricted to the configured Jimmy repository and fixed GitHub API host.
+- GitHub credentials are isolated from Gemini credentials.
+- Settings UI masks the token, clears the input after saving, supports deletion, and verifies access to the configured repository.
+
+### Restricted GitHub API
+- `GitHubApiClient` is restricted to `mikhaildezprofi-glitch/mobile-ai-agent` and the fixed GitHub API host.
 - It creates only `code-agent/*` working branches, commits bounded UTF-8 project files through the Git Database API, and uses the expected branch SHA to reject stale changes.
-- File-path validation blocks traversal, `.git`, generated directories, local properties, model weights, APKs, and common signing-key files.
+- Git reference validation rejects traversal, malformed segments, hidden path segments, and `.lock` suffixes.
+- File-path validation blocks traversal, `.git`, generated directories, local properties, model weights, APKs, environment files, and common signing-key/credential files.
 - The client can dispatch only `.github/workflows/agent-unit-tests.yml`, list runs/jobs, compare a working branch with its base, and retrieve job logs.
 - Job-log downloads use GitHub's short-lived HTTPS redirect without forwarding the PAT to the redirect host. ZIP entries and total log size are bounded.
-- The dedicated unit-test workflow runs `:app:testDebugUnitTest` only, with `contents: read`; it does not build an APK.
+
+### Code Agent project UI
+- Project dialog now supports creating an isolated GitHub working branch.
+- A local preview reads the selected private workspace project and lists every file before upload.
+- Preview rejects unsafe paths, unreadable/binary files, more than 100 files, and total content above 5 MiB.
+- Upload requires a separate explicit confirmation action.
+- Successful upload creates one commit in the selected `code-agent/*` branch and dispatches the test-only workflow.
+- UI can refresh workflow status and retrieve job summaries/failure logs.
+- The remote operation never writes to `main`.
+- Current limitation: this first version adds or updates files. It does not delete remote files removed from the local project. It also does not yet persist an active GitHub working branch across app restarts.
+
+### CI workflow
+- The dedicated unit-test workflow runs `:app:testDebugUnitTest` only, with `contents: read`.
+- It does not build an APK, upload a release, or receive the user's PAT.
+- CI execution of project Gradle scripts has no repository write token or application secrets.
 
 ## Fine-grained token permissions
 
@@ -30,11 +48,15 @@ GitHub grants Metadata read access automatically. Do not grant Administration, S
 - Intermediate validation uses the test-only workflow, never the APK build workflow.
 - The GitHub client does not execute arbitrary shell commands or project-provided scripts.
 
-## Remaining work before stage 1 is complete
+## Remaining work in this stage
 
-1. Connect the Code Agent's project workspace to the GitHub client.
-2. Add local change preview and explicit confirmation before creating a branch or pushing files.
-3. Add UI for creating/selecting the working branch, sending a commit, dispatching tests, and viewing status/logs.
-4. Add automated tests for GitHub API request construction, stale-branch handling, API errors, and log archive parsing.
-5. Run the unit-test workflow on the integration branch and fix all failures.
-6. Verify the complete user flow and update this document with the final tested behavior.
+1. Run and verify the unit-test workflow on the integration branch after the latest UI/API changes; fix any failures.
+2. Add API-level tests for mocked HTTP requests, optimistic concurrency conflicts, and ZIP log extraction.
+3. Persist working-branch metadata and pending preview state safely so the flow can resume after app restart.
+4. Add remote deletion preview/confirmation, so a full project sync can mirror removals safely.
+5. Perform an end-to-end run with a user-configured fine-grained token and a disposable test branch.
+6. Update this document with the verified end-to-end result.
+
+## Build policy
+
+No APK was built during this stage. APK assembly remains deferred until all planned development changes are complete and the user explicitly authorizes the final build.
