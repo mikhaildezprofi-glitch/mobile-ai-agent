@@ -163,7 +163,13 @@ class GitHubApiClient(
         }
         normalizedDeletes.forEach { path ->
             // A null SHA tells GitHub's Git Trees API to remove this path.
-            treeEntries.put(JSONObject().put("path", path).put("sha", JSONObject.NULL))
+            treeEntries.put(
+                JSONObject()
+                    .put("path", path)
+                    .put("mode", "100644")
+                    .put("type", "blob")
+                    .put("sha", JSONObject.NULL)
+            )
         }
 
         val tree = request(
