@@ -14,7 +14,7 @@ import javax.crypto.spec.GCMParameterSpec
  * Stores a fine-grained GitHub token encrypted with an AES-256 key held by Android Keystore.
  * The token itself is never written to disk in plaintext.
  */
-class GitHubTokenStore(context: Context) {
+class GitHubTokenStore(context: Context) : GitHubTokenReader {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun hasToken(): Boolean =
@@ -38,7 +38,7 @@ class GitHubTokenStore(context: Context) {
     }
 
     @Synchronized
-    fun read(): String? {
+    override fun read(): String? {
         val ivText = prefs.getString(IV, null) ?: return null
         val encryptedText = prefs.getString(CIPHERTEXT, null) ?: return null
         return try {
