@@ -14,6 +14,11 @@ android {
         targetSdk = 36
         versionCode = 23
         versionName = "0.4.1"
+
+        // Target hardware is ARM64 (Samsung Exynos); avoid packaging unused ABIs.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {
