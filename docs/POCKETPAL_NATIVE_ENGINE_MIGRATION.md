@@ -87,6 +87,7 @@ The Kotlin layer must assemble fragmented tool-call arguments safely, validate t
 - **Implemented:** PocketPal JNI projector load/release and OpenAI-style `image_url` conversion to MTMD media markers/paths.
 - **Implemented:** Compose photo/video flow now calls `AgentCoordinator.generateWithImages`; raw image paths stay local and the text summary alone can be cloud-routed.
 - **Implemented:** `PocketPalLocalProvider` keeps one native context and switches between Qwen and SmolVLM+mmproj, releasing the prior model before loading the next.
+- **Implemented:** text tool schemas are omitted for SmolVLM image requests; only text generation receives the `calculate` and `datetime` tools.
 - **Not enabled:** audio input. The current vision projector rejects `input_audio` explicitly; audio requires a compatible model/projector path.
 - Model-specific sampler/context settings, context checkpoints and speculative decoding remain future work after correctness and memory tests.
 - Enable any hardware backend only after verified device capability detection.
