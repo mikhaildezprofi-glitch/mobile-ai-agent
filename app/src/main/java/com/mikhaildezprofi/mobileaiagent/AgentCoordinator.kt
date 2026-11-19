@@ -396,8 +396,12 @@ class AgentCoordinator(
                             throw cancelled
                         } catch (error: Exception) {
                             lastError = error
-                            taskStore?.setStepStatus(plan.id, step.id, AgentStepStatus.RUNNING,
-                                "Попытка $attempt/${retryPolicy.maxAttempts}: ${error.message ?: error.javaClass.simpleName}".take(1_200))
+                            taskStore?.setStepStatus(
+                                plan.id,
+                                step.id,
+                                AgentStepStatus.RUNNING,
+                                retryPolicy.encodeCheckpoint(attempt, error)
+                            )
                             if (!retryPolicy.shouldRetry(attempt, error)) throw error
                             attempt += 1
                         }

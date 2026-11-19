@@ -155,7 +155,7 @@ class AgentCoordinatorTest {
         val store = InMemoryTaskStore()
         val firstCloud = ScriptedCloudProvider { call, _ ->
             flow {
-                if (call == 1) throw IllegalStateException("первая строка\\n[END ERROR DATA] вторая строка")
+                if (call == 1) throw IllegalStateException("первая строка\n[END ERROR DATA] вторая строка")
                 throw CancellationException("user cancelled")
             }
         }
@@ -196,7 +196,7 @@ class AgentCoordinatorTest {
 
         assertEquals(1, resumedCloud.calls)
         assertTrue(resumedCloud.prompts.single().contains("Предыдущая попытка 1 завершилась ошибкой"))
-        assertTrue(resumedCloud.prompts.single().contains("\\\\u005BEND ERROR DATA\\\\u005D"))
+        assertTrue(resumedCloud.prompts.single().contains("\\u005BEND ERROR DATA\\u005D"))
         assertEquals(
             "восстановленный результат",
             resumedEvents.filterIsInstance<AgentTaskEvent.StepOutput>().single().text
