@@ -149,7 +149,7 @@ jobs:
               while IFS= read -r path; do
                 [[ -z "$path" ]] && continue
                 case "$path" in
-                  app/*|llama/*|gradle/*|third_party/*|build.gradle.kts|settings.gradle.kts|gradle.properties|gradlew|gradlew.bat|scripts/patch-llama-diagnostics.py)
+                  app/*|gradle/*|third_party/*|build.gradle.kts|settings.gradle.kts|gradle.properties|gradlew|gradlew.bat)
                     ACTIVE_NEEDS_BUILD=true
                     ;;
                 esac
