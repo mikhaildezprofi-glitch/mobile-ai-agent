@@ -136,7 +136,8 @@ class AgentCoordinatorTest {
         val plan = AgentTaskPlan.single("Подготовь краткий результат")
 
         val events = coordinator.executePlan(
-            plan, maxTokensPerStep = 256, hybridMode = true
+            plan, maxTokensPerStep = 256, hybridMode = true,
+            routing = AgentRoutingConfig(fallbackToLocal = false)
         ).toList()
 
         assertEquals(2, cloud.calls)
@@ -191,7 +192,8 @@ class AgentCoordinatorTest {
             retryPolicy = AgentStepRetryPolicy(3)
         )
         val resumedEvents = resumedCoordinator.resumePlan(
-            plan.id, maxTokensPerStep = 256, hybridMode = true
+            plan.id, maxTokensPerStep = 256, hybridMode = true,
+            routing = AgentRoutingConfig(fallbackToLocal = false)
         ).toList()
 
         assertEquals(1, resumedCloud.calls)
