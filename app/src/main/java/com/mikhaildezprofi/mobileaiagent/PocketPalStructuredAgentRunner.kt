@@ -11,7 +11,8 @@ internal class PocketPalStructuredAgentRunner(
     private val bridge: PocketPalGenerationEngine,
     private val registry: AgentTalentRegistry = AgentTalentRegistry.default(),
     private val maxToolCalls: Int = MAX_TOOL_CALLS,
-    private val enableTools: Boolean = true
+    private val enableTools: Boolean = true,
+    private val codeTools: CodeAgentToolRegistry? = null
 ) {
     fun generate(
         messages: JSONArray,
@@ -20,7 +21,14 @@ internal class PocketPalStructuredAgentRunner(
         listener: PocketPalSnapshotListener? = null
     ): PocketPalGenerationResult {
         val workingMessages = JSONArray(messages.toString())
-        val toolSchemas = if (enableTools) registry.openAiToolDefinitions() else JSONArray()
+        val toolSchemas = if (enableTools) {
+            JSONArray().apply {
+                val nativeDefinitions = registry.openAiToolDefinitions()
+                for (index in 0 until nativeDefinitions.length()) put(nativeDefinitions.get(index))
+                val codeDefinitions = codeTools?.definitions() ?: JSONArray()
+                for (index in 0 until codeDefinitions.length()) put(codeDefinitions.get(index))
+            }
+        } else JSONArray()
         var executedCalls = 0
         var toolsEnabled = true
 
@@ -72,7 +80,11 @@ internal class PocketPalStructuredAgentRunner(
                 val toolResult = if (executedCalls < maxToolCalls) {
                     val arguments = runCatching { JSONObject(call.argumentsJson) }
                         .getOrElse { JSONObject() }
-                    registry.execute(AgentToolInvocation(call.name, arguments))
+                    if (codeTools?.canExecute(call.name) == true) {
+                        codeTools.execute(call.name, arguments)
+                    } else {
+                        registry.execute(AgentToolInvocation(call.name, arguments))
+                    }
                 } else {
                     "Инструмент не выполнен: достигнут лимит $maxToolCalls вызовов на один запрос."
                 }
