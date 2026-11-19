@@ -26,7 +26,7 @@ internal data class PocketPalGenerationResult(
 
 /** Injectable contract shared by the JNI bridge and deterministic runner tests. */
 internal interface PocketPalGenerationEngine {
-    override fun generate(
+    fun generate(
         messages: JSONArray,
         tools: JSONArray = JSONArray(),
         maxTokens: Int = 1024,
@@ -67,12 +67,12 @@ internal class PocketPalNativeBridge : PocketPalGenerationEngine, AutoCloseable 
         }
     }
 
-    fun generate(
+    override fun generate(
         messages: JSONArray,
-        tools: JSONArray = JSONArray(),
-        maxTokens: Int = 1024,
-        temperature: Float = 0.7f,
-        listener: PocketPalSnapshotListener? = null
+        tools: JSONArray,
+        maxTokens: Int,
+        temperature: Float,
+        listener: PocketPalSnapshotListener?
     ): PocketPalGenerationResult {
         val raw = synchronized(lifecycleLock) {
             val currentHandle = synchronized(this) {
