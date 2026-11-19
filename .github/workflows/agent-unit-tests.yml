@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: agent-unit-tests-${{ github.ref }}
@@ -64,3 +65,12 @@ jobs:
 
       - name: Run unit tests only
         run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+
+      - name: Upload JUnit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-unit-test-reports
+          path: app/build/test-results/testDebugUnitTest/
+          if-no-files-found: warn
+          retention-days: 7
