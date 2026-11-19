@@ -1926,7 +1926,7 @@ fun MainScreen() {
                         }
                     }
                     Text(
-                        "Лимит ответа: ${configDraft.maxOutputTokens} токенов • temperature: ${configDraft.temperature}. Температура применяется к Gemini; локальный Qwen использует параметры native engine.",
+                        "Лимит ответа: ${configDraft.maxOutputTokens} токенов • temperature: ${configDraft.temperature}. Температура применяется к Gemini; локальный PocketPal получает temperature при каждом запросе.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2028,11 +2028,6 @@ fun MainScreen() {
                                     if (!loaded.customPrompt) {
                                         systemPrompt = loaded.systemPrompt
                                         promptDraft = loaded.systemPrompt
-                                        engine?.let { active ->
-                                            withContext(Dispatchers.IO) {
-                                                if (modelReady) active.setSystemPrompt(loaded.systemPrompt)
-                                            }
-                                        }
                                     }
                                     status = "Конфигурация ${result.version} проверена SHA-256 и загружена (${result.downloadedFiles} файлов)." +
                                         if (loaded.customPrompt) " Пользовательский промпт сохранён."
@@ -2057,13 +2052,6 @@ fun MainScreen() {
                             selectedResponseProfileId = loaded.config.selectedResponseProfileId
                             systemPrompt = loaded.systemPrompt
                             promptDraft = loaded.systemPrompt
-                            engine?.let { active ->
-                                scope.launch {
-                                    withContext(Dispatchers.IO) {
-                                        if (modelReady) active.setSystemPrompt(loaded.systemPrompt)
-                                    }
-                                }
-                            }
                             status = "Runtime-файлы перечитаны."
                         }
                     ) {
@@ -2102,18 +2090,6 @@ fun MainScreen() {
                         selectedPromptProfileId = runtimeFiles.config.selectedPromptProfileId
                         selectedResponseProfileId = runtimeFiles.config.selectedResponseProfileId
                         systemPrompt = runtimeFiles.systemPrompt
-                        engine?.let { active ->
-                            scope.launch {
-                                try {
-                                    withContext(Dispatchers.IO) {
-                                        if (modelReady) active.setSystemPrompt(systemPrompt)
-                                    }
-                                    status = "Настройки и промпт сохранены."
-                                } catch (error: Exception) {
-                                    status = "Настройки сохранены; промпт применится после перезапуска модели: ${error.message}"
-                                }
-                            }
-                        }
                         showSettingsDialog = false
                     }
                 ) { Text("Сохранить") }
