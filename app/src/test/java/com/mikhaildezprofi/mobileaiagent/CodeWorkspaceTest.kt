@@ -47,6 +47,49 @@ class CodeWorkspaceTest {
     }
 
     @Test
+    fun exactReplacementRequiresUniqueMatchAndCurrentSha() {
+        workspace.writeFile("src/Feature.kt", "fun first() = 1\\nfun second() = 2\\n")
+        val before = workspace.readFile("src/Feature.kt")
+
+        val updatedSha = workspace.replaceText(
+            "src/Feature.kt",
+            before.sha256,
+            "fun second() = 2",
+            "fun second() = 42"
+        )
+        val updated = workspace.readFile("src/Feature.kt")
+        assertEquals(updatedSha, updated.sha256)
+        assertTrue(updated.content.contains("fun second() = 42"))
+
+        var duplicateRejected = false
+        try {
+            workspace.replaceText(
+                "src/Feature.kt",
+                updated.sha256,
+                "fun",
+                "suspend fun"
+            )
+        } catch (_: IllegalArgumentException) {
+            duplicateRejected = true
+        }
+        assertTrue(duplicateRejected)
+
+        var staleRejected = false
+        try {
+            workspace.replaceText(
+                "src/Feature.kt",
+                before.sha256,
+                "fun first() = 1",
+                "fun first() = 0"
+            )
+        } catch (_: IllegalArgumentException) {
+            staleRejected = true
+        }
+        assertTrue(staleRejected)
+        assertTrue(workspace.readFile("src/Feature.kt").content.contains("fun first() = 1"))
+    }
+
+    @Test
     fun rejectsAbsoluteAndParentTraversalPaths() {
         val paths = listOf("../outside.txt", "/sdcard/private.txt", "src/../../outside.txt")
         paths.forEach { path ->
