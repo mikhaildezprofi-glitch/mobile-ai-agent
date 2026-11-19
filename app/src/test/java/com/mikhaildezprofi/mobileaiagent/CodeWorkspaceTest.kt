@@ -65,8 +65,8 @@ class CodeWorkspaceTest {
     @Test
     fun listingAndSearchSkipBuildAndGitDirectories() {
         workspace.writeFile("src/Main.kt", "class Main")
-        workspace.writeFile("build/generated.kt", "class Generated")
-        workspace.writeFile(".git/config", "secret = true")
+        File(root, "build").apply { mkdirs() }.resolve("generated.kt").writeText("class Generated")
+        File(root, ".git").apply { mkdirs() }.resolve("config").writeText("secret = true")
 
         val files = workspace.listFiles(maxDepth = 5)
         assertTrue(files.contains("src/Main.kt"))
