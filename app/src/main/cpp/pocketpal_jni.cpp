@@ -65,24 +65,7 @@ std::vector<std::string> normalizeMultimodalMessages(json & messages) {
                     {"text", "<__media__>"}
                 }));
             } else if (type == "input_audio") {
-                const auto audio = part.find("input_audio");
-                if (audio == part.end() || !audio->is_object()) {
-                    throw std::runtime_error("Audio attachment is missing input_audio.");
-                }
-                std::string mediaPath = audio->value("url", std::string());
-                if (!mediaPath.empty()) {
-                    if (mediaPath.compare(0, 7, "file://") == 0) mediaPath.erase(0, 7);
-                } else {
-                    mediaPath = audio->value("data", std::string());
-                }
-                if (mediaPath.empty()) {
-                    throw std::runtime_error("Audio attachment requires a local url or data URL.");
-                }
-                mediaPaths.push_back(std::move(mediaPath));
-                normalized.push_back(json::object({
-                    {"type", "text"},
-                    {"text", "<__media__>"}
-                }));
+                throw std::runtime_error("Audio input is not enabled by the current vision projector.");
             } else {
                 normalized.push_back(part);
             }
