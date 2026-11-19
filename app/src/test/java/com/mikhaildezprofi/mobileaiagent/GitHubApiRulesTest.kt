@@ -32,7 +32,7 @@ class GitHubApiRulesTest {
     }
 
     @Test fun rejectsSecretsAndGeneratedFiles() {
-        listOf(".env", "release.keystore", "signing.p12", "local.properties", "model.gguf", "app.apk")
+        listOf(".env", ".env.production", "release.keystore", "signing.p12", "local.properties", "model.gguf", "app.apk", "secrets/token.json", ".ssh/id_rsa", "google-services.json")
             .forEach { path ->
                 assertThrows(IllegalArgumentException::class.java) {
                     GitHubApiClient.normalizeWorkspacePath(path)
