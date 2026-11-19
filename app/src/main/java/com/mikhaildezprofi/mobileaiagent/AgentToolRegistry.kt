@@ -9,7 +9,8 @@ enum class AgentCapabilityId {
     WEB_SEARCH,
     ANDROID_DEVICE_CONTROL,
     LOCAL_CALCULATION,
-    LOCAL_DATE_TIME
+    LOCAL_DATE_TIME,
+    CODE_WORKSPACE_FILES
 }
 
 data class AgentCapability(
@@ -28,7 +29,8 @@ class AgentToolRegistry private constructor(private val entries: List<AgentCapab
             localReady: Boolean,
             cloudReady: Boolean,
             fileReaderReady: Boolean = true,
-            visionReady: Boolean = false
+            visionReady: Boolean = false,
+            codeWorkspaceReady: Boolean = false
         ) = AgentToolRegistry(listOf(
             AgentCapability(
                 AgentCapabilityId.LOCAL_TEXT_GENERATION,
@@ -79,6 +81,13 @@ class AgentToolRegistry private constructor(private val entries: List<AgentCapab
                 "Дата и время",
                 true,
                 "Текущее время устройства или указанного часового пояса IANA."
+            )
+,            AgentCapability(
+                AgentCapabilityId.CODE_WORKSPACE_FILES,
+                "Рабочая область Code Agent",
+                codeWorkspaceReady,
+                if (codeWorkspaceReady) "Чтение, поиск и безопасная запись исходников в приватную папку приложения. Выполнение команд и тестов не разрешено."
+                else "Рабочая область Code Agent недоступна."
             )
         ))
     }
