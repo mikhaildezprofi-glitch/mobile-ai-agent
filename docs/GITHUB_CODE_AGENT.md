@@ -24,7 +24,7 @@
 - Successful upload creates one commit in the selected `code-agent/*` branch and dispatches the test-only workflow.
 - UI can refresh workflow status and retrieve job summaries/failure logs.
 - The remote operation never writes to `main`.
-- Current limitation: this first version adds or updates files. It does not delete remote files removed from the local project. It also does not yet persist an active GitHub working branch across app restarts.
+- The active working branch, base SHA, and last workflow run ID are stored in app-private preferences. After restart, the user can regenerate the local file preview before committing. Pending file contents are deliberately not persisted.
 
 ### CI workflow
 - The dedicated unit-test workflow runs `:app:testDebugUnitTest` only, with `contents: read`.
@@ -52,10 +52,9 @@ GitHub grants Metadata read access automatically. Do not grant Administration, S
 
 1. Run and verify the unit-test workflow on the integration branch after the latest UI/API changes; fix any failures.
 2. Add API-level tests for mocked HTTP requests, optimistic concurrency conflicts, and ZIP log extraction.
-3. Persist working-branch metadata and pending preview state safely so the flow can resume after app restart.
-4. Add remote deletion preview/confirmation, so a full project sync can mirror removals safely.
-5. Perform an end-to-end run with a user-configured fine-grained token and a disposable test branch.
-6. Update this document with the verified end-to-end result.
+3. Add remote deletion preview/confirmation, so a full project sync can mirror removals safely.
+4. Perform an end-to-end run with a user-configured fine-grained token and a disposable test branch.
+5. Update this document with the verified end-to-end result.
 
 ## Build policy
 
