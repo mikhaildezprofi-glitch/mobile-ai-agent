@@ -539,44 +539,28 @@ fun MainScreen() {
             }
             engine = instance
 
-            if (isSavedVisionModel && savedModel != null) {
-                check(initialState !is InferenceEngine.State.Error) {
-                    "Legacy Vision engine initialization failed: ${(initialState as InferenceEngine.State.Error).exception.message}"
-                }
-                status = "Восстановление Vision-модели…"
-                withContext(Dispatchers.IO) {
-                    if (instance.state.value is InferenceEngine.State.ModelReady) instance.cleanUp()
-                    instance.loadModel(savedModel.absolutePath)
-                    if (systemPrompt.isNotBlank()) instance.setSystemPrompt(systemPrompt)
-                    val savedProjector = preferences.getString("vision_mmproj_path", null)?.let { File(it) }
-                    val expectedProjector = File(savedModel.parentFile, "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf")
-                    val projector = listOfNotNull(savedProjector, expectedProjector)
-                        .firstOrNull { it.isFile && it.canRead() && it.length() > 0L }
-                    if (projector != null) {
-                        val vision = instance as? VisionInferenceEngine
-                            ?: error("Legacy engine does not support Vision.")
-                        vision.loadVisionProjector(projector.absolutePath)
-                        preferences.edit().putString("vision_mmproj_path", projector.absolutePath).apply()
-                    }
-                }
-                modelReady = instance.state.value is InferenceEngine.State.ModelReady
-                status = if (modelReady) {
-                    "Vision-модель восстановлена. Текстовые запросы выполняет PocketPal."
-                } else {
-                    "Vision-модель найдена, но движок не подтвердил готовность."
-                }
-            } else {
-                // PocketPal is the sole text engine. Unload any model retained by the
-                // previous llama.cpp implementation to prevent duplicate RAM usage.
-                withContext(Dispatchers.IO) {
-                    if (instance.state.value is InferenceEngine.State.ModelReady) instance.cleanUp()
-                }
-                modelReady = savedModel != null
-                status = if (modelReady) {
-                    "PocketPal готов. Локальная модель будет загружена при первом запросе."
-                } else {
+            // PocketPal owns both text and multimodal inference. Keep the legacy
+            // llama.cpp context unloaded so Qwen/SmolVLM are never duplicated in RAM.
+            withContext(Dispatchers.IO) {
+                if (instance.state.value is InferenceEngine.State.ModelReady ||
+                    instance.state.value is InferenceEngine.State.Error
+                ) instance.cleanUp()
+            }
+            modelReady = savedModel != null
+            visionReady = withContext(Dispatchers.IO) {
+                val selectedVision = preferences.getString("vision_model_path", null)?.let { File(it) }
+                val selectedProjector = preferences.getString("vision_mmproj_path", null)?.let { File(it) }
+                (selectedVision?.isFile == true && selectedVision.canRead() &&
+                    selectedProjector?.isFile == true && selectedProjector.canRead()) ||
+                    VisionModelAssets.areAssetsPresent(appContext)
+            }
+            status = when {
+                isSavedVisionModel && modelReady ->
+                    "SmolVLM выбрана. PocketPal загрузит её вместе с проектором при анализе изображений."
+                modelReady ->
+                    "PocketPal готов. Текстовая модель будет загружена при первом запросе."
+                else ->
                     "PocketPal готов. Выберите GGUF-модель для локальной работы."
-                }
             }
         } catch (error: LinkageError) {
             engine = null
