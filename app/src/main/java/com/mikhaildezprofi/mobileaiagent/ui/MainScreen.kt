@@ -1767,6 +1767,21 @@ fun MainScreen() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(codeProjectStatus, style = MaterialTheme.typography.bodySmall)
+                    TextButton(
+                        enabled = !busy && codeProjectName.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")),
+                        onClick = {
+                            val workspaceRoot = File(appContext.filesDir, "code-workspace").canonicalFile
+                            val selectedProject = File(workspaceRoot, codeProjectName.trim()).canonicalFile
+                            if (selectedProject.parentFile == workspaceRoot && selectedProject.isDirectory) {
+                                appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+                                    .edit().putString("active_code_project", codeProjectName.trim()).apply()
+                                codeProjectStatus = "Активен проект «${codeProjectName.trim()}». Инструменты Code Agent ограничены его папкой."
+                                status = codeProjectStatus
+                            } else {
+                                codeProjectStatus = "Проект с таким именем не найден в рабочей области."
+                            }
+                        }
+                    ) { Text("Выбрать проект для Джимми") }
                 }
             },
             confirmButton = {
