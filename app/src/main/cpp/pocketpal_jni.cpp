@@ -340,7 +340,7 @@ Java_com_mikhaildezprofi_mobileaiagent_PocketPalNativeBridge_nativeGenerate(
     }
 
     try {
-        const std::string messages = fromJavaString(env, messagesJson);
+        std::string messages = fromJavaString(env, messagesJson);
         const std::string tools = fromJavaString(env, toolsJson);
         if (messages.empty()) {
             throw std::invalid_argument("Chat messages JSON is empty.");
