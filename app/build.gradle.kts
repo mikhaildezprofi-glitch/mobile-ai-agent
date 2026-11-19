@@ -53,6 +53,11 @@ android {
 
     buildFeatures { compose = true }
 
+    // JVM unit tests use Android APIs such as android.util.Log; return SDK stub defaults.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
