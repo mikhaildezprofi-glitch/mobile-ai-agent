@@ -350,6 +350,8 @@ fun MainScreen() {
         )
     }
     var githubPendingFiles by remember { mutableStateOf<List<GitHubWorkspaceFile>>(emptyList()) }
+    var githubPendingDeletePaths by remember { mutableStateOf<List<String>>(emptyList()) }
+    var githubDeleteConfirmed by remember { mutableStateOf(false) }
     var githubPreviewText by remember { mutableStateOf("") }
     var githubProjectStatus by remember { mutableStateOf("") }
     var githubLastRunId by remember(appContext) { mutableStateOf(appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE).getLong("github_last_run_id", 0L).takeIf { it > 0L }) }
@@ -1798,7 +1800,7 @@ fun MainScreen() {
                     HorizontalDivider()
                     Text("GitHub: отправка проекта и тестирование", fontWeight = FontWeight.SemiBold)
                     Text(
-                        "Создаётся отдельная ветка code-agent/*. Перед отправкой показывается список файлов. Удаление файлов на GitHub автоматически не выполняется.",
+                        "Создаётся отдельная ветка code-agent/*. Перед отправкой показывается список файлов. Удаление отключено по умолчанию и доступно только для файлов, ранее синхронизированных Джимми в этой ветке.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1808,6 +1810,18 @@ fun MainScreen() {
                     if (githubPreviewText.isNotBlank()) {
                         SelectionContainer {
                             Text(githubPreviewText, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    if (githubPendingDeletePaths.isNotEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = githubDeleteConfirmed,
+                                onCheckedChange = { githubDeleteConfirmed = it }
+                            )
+                            Text(
+                                "Подтверждаю удаление ${githubPendingDeletePaths.size} файлов из списка выше",
+                                style = MaterialTheme.typography.bodySmall
+                            )
                         }
                     }
                     if (githubProjectStatus.isNotBlank()) {
@@ -1832,6 +1846,8 @@ fun MainScreen() {
                                             .remove("github_last_run_id")
                                             .apply()
                                         githubPendingFiles = emptyList()
+                                        githubPendingDeletePaths = emptyList()
+                                        githubDeleteConfirmed = false
                                         githubPreviewText = ""
                                         githubLastRunId = null
                                         githubProjectStatus = "Создана ветка ${working.name} от ${working.baseBranch}."
@@ -1877,14 +1893,32 @@ fun MainScreen() {
                                             }
                                             prepared
                                         }
+                                        val workingName = githubWorkingBranch?.name
+                                        val prefs = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+                                        val managedKey = workingName?.let { "github_managed_paths_$it" }
+                                        val previouslyManaged = managedKey?.let { prefs.getStringSet(it, emptySet())?.toSet() }.orEmpty()
+                                        val currentPaths = files.map { it.path }.toSet()
+                                        val deletions = previouslyManaged.filterNot { it in currentPaths }.sorted()
                                         githubPendingFiles = files
+                                        githubPendingDeletePaths = deletions
+                                        githubDeleteConfirmed = false
                                         githubPreviewText = buildString {
-                                            append("Предпросмотр: ${files.size} файлов, ")
+                                            append("Предпросмотр изменений: ${files.size} файлов, ")
                                             append(files.sumOf { it.content.toByteArray(Charsets.UTF_8).size } / 1024)
-                                            append(" КБ\n")
-                                            files.forEach { append("• ").append(it.path).append('\n') }
+                                            append(" КБ\\n")
+                                            files.forEach { append("• + ").append(it.path).append('\\n') }
+                                            if (deletions.isNotEmpty()) {
+                                                append("\\nКандидаты на удаление (не выбраны автоматически):\\n")
+                                                deletions.forEach { append("• − ").append(it).append('\\n') }
+                                            } else {
+                                                append("\\nУдалений нет. Файлы из базовой ветки не затрагиваются.")
+                                            }
                                         }
-                                        githubProjectStatus = "Предпросмотр готов. Файлы ещё не отправлены."
+                                        githubProjectStatus = if (workingName == null) {
+                                            "Предпросмотр готов. Для сопоставления с предыдущей синхронизацией сначала создайте рабочую ветку."
+                                        } else {
+                                            "Предпросмотр готов. Ничего не отправлено и не удалено."
+                                        }
                                     } catch (error: Exception) {
                                         githubPendingFiles = emptyList()
                                         githubPreviewText = ""
@@ -1898,10 +1932,11 @@ fun MainScreen() {
                     }
                     TextButton(
                         enabled = githubTokenConfigured && githubWorkingBranch != null &&
-                            githubPendingFiles.isNotEmpty() && !githubProjectBusy,
+                            (githubPendingFiles.isNotEmpty() || (githubDeleteConfirmed && githubPendingDeletePaths.isNotEmpty())) && !githubProjectBusy,
                         onClick = {
                             val working = githubWorkingBranch ?: return@TextButton
                             val files = githubPendingFiles
+                            val deletePaths = if (githubDeleteConfirmed) githubPendingDeletePaths else emptyList()
                             githubProjectBusy = true
                             githubProjectStatus = "Отправка подтверждённого списка файлов в ${working.name}…"
                             scope.launch {
@@ -1911,7 +1946,8 @@ fun MainScreen() {
                                             branch = working.name,
                                             expectedHeadSha = working.baseSha,
                                             files = files,
-                                            message = "Code Agent: update ${codeProjectName.trim()}"
+                                            message = "Code Agent: update ${codeProjectName.trim()}",
+                                            deletePaths = deletePaths
                                         )
                                     }
                                     val updatedBranch = working.copy(baseSha = committed.commitSha)
@@ -1919,8 +1955,15 @@ fun MainScreen() {
                                     appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE).edit()
                                         .putString("github_working_sha", updatedBranch.baseSha)
                                         .apply()
+                                    val managedKey = "github_managed_paths_${working.name}"
+                                    val prefs = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+                                    val previousManaged = prefs.getStringSet(managedKey, emptySet())?.toSet().orEmpty()
+                                    val nextManaged = (previousManaged + files.map { it.path }).minus(deletePaths.toSet())
+                                    prefs.edit().putStringSet(managedKey, nextManaged).apply()
                                     githubPendingFiles = emptyList()
-                                    githubProjectStatus = "Отправлено: ${committed.changedFiles} файлов. Commit ${committed.commitSha.take(12)}. Запускаю unit-тесты…"
+                                    githubPendingDeletePaths = emptyList()
+                                    githubDeleteConfirmed = false
+                                    githubProjectStatus = "Отправлено изменений: ${committed.changedFiles} (удалено: ${deletePaths.size}). Commit ${committed.commitSha.take(12)}. Запускаю unit-тесты…"
                                     withContext(Dispatchers.IO) {
                                         GitHubApiClient(githubTokenStore).dispatchUnitTests(working.name)
                                     }
