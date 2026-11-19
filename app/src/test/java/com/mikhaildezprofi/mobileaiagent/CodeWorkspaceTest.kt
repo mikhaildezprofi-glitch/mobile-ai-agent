@@ -78,6 +78,54 @@ class CodeWorkspaceTest {
     }
 
     @Test
+    fun listingDoesNotFollowSymlinkCyclesOrExternalLinks() {
+        workspace.writeFile("src/Main.kt", "class Main")
+        val sourceDirectory = File(root, "src")
+        val loop = File(sourceDirectory, "loop")
+        val external = Files.createTempDirectory("jimmy-outside-workspace")
+        try {
+            Files.createSymbolicLink(loop.toPath(), root.toPath())
+            Files.createSymbolicLink(File(root, "outside-link").toPath(), external)
+            File(external.toFile(), "secret.kt").writeText("secret")
+
+            val files = workspace.listFiles(maxDepth = 8)
+
+            assertTrue(files.contains("src/Main.kt"))
+            assertFalse(files.any { it.contains("loop") || it.contains("outside-link") })
+        } finally {
+            external.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun refusesToReadOrWriteThroughSymbolicLinks() {
+        val outside = Files.createTempDirectory("jimmy-outside-file")
+        try {
+            File(outside.toFile(), "secret.kt").writeText("private")
+            Files.createSymbolicLink(File(root, "linked.kt").toPath(), File(outside.toFile(), "secret.kt").toPath())
+
+            var readRejected = false
+            try {
+                workspace.readFile("linked.kt")
+            } catch (_: IllegalArgumentException) {
+                readRejected = true
+            }
+            assertTrue(readRejected)
+
+            var writeRejected = false
+            try {
+                workspace.writeFile("linked.kt", "overwritten")
+            } catch (_: IllegalArgumentException) {
+                writeRejected = true
+            }
+            assertTrue(writeRejected)
+            assertEquals("private", File(outside.toFile(), "secret.kt").readText())
+        } finally {
+            outside.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun toolRegistryExposesOnlySandboxedCodeOperations() {
         val tools = CodeAgentToolRegistry(workspace)
         val definitions = tools.definitions()
