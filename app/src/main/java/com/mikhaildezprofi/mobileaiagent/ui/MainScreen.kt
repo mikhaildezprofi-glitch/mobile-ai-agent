@@ -421,13 +421,16 @@ fun MainScreen() {
         }
     }
 
-    // Reflect actual native projector readiness in the capability list.
-    LaunchedEffect(engine, modelReady, visionRevision) {
-        val visionEngine = engine as? VisionInferenceEngine
-        visionReady = if (modelReady && visionEngine != null) {
-            try { withContext(Dispatchers.IO) { visionEngine.isVisionReady() } }
-            catch (_: Exception) { false }
-        } else false
+    // Reflect installed PocketPal MTMD assets, not the retired legacy engine state.
+    LaunchedEffect(appContext, modelReady, visionRevision) {
+        visionReady = withContext(Dispatchers.IO) {
+            val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+            val selectedVision = preferences.getString("vision_model_path", null)?.let { File(it) }
+            val selectedProjector = preferences.getString("vision_mmproj_path", null)?.let { File(it) }
+            (selectedVision?.isFile == true && selectedVision.canRead() &&
+                selectedProjector?.isFile == true && selectedProjector.canRead()) ||
+                VisionModelAssets.areAssetsPresent(appContext)
+        }
     }
 
     // Sample the actual Android app process while native inference is running.
@@ -564,20 +567,12 @@ fun MainScreen() {
             }
         } catch (error: LinkageError) {
             engine = null
-            modelReady = savedModel != null && !isSavedVisionModel
-            status = if (modelReady) {
-                "PocketPal готов. Старый Vision-модуль недоступен: ${error.message ?: error.javaClass.simpleName}"
-            } else {
-                "PocketPal готов. Выберите GGUF-модель. Vision-модуль недоступен."
-            }
+            modelReady = savedModel != null
+            status = "PocketPal доступен независимо от старого движка: ${error.message ?: error.javaClass.simpleName}"
         } catch (error: Exception) {
             engine = null
-            modelReady = savedModel != null && !isSavedVisionModel
-            status = if (modelReady) {
-                "PocketPal готов. Старый Vision-модуль отключён: ${error.message ?: error.javaClass.simpleName}"
-            } else {
-                "PocketPal готов. Не удалось восстановить Vision-модуль или найти GGUF: ${error.message ?: error.javaClass.simpleName}"
-            }
+            modelReady = savedModel != null
+            status = "PocketPal готов; старый движок не инициализирован: ${error.message ?: error.javaClass.simpleName}"
         }
     }
 
@@ -986,7 +981,7 @@ fun MainScreen() {
         val cloudOnlyReady = mode == AgentMode.HYBRID &&
             geminiKeyConfigured && runtimeConfig.geminiApiEnabled
         if ((userText.isEmpty() && attachments.isEmpty()) ||
-            (!(engine != null && modelReady) && !cloudOnlyReady) || busy
+            (!modelReady && !cloudOnlyReady) || busy
         ) return
 
         val attached = attachments.toList()
@@ -1815,7 +1810,7 @@ fun MainScreen() {
             },
             confirmButton = {
                 TextButton(
-                    enabled = engine != null && !busy,
+                    enabled = !busy,
                     onClick = { modelPicker.launch(arrayOf("*/*")) }
                 ) { Text("Выбрать GGUF") }
             },
