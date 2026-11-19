@@ -102,7 +102,7 @@ class PocketPalStructuredAgentRunnerTest {
                         result(calls = listOf(toolCall(
                             "code_call_1",
                             "code_write_file",
-                            """{"path":"src/Hello.kt","content":"fun hello() = \\"world\\""}"""
+                            """{"path":"src/Hello.kt","content":"fun hello() = 42"}"""
                         ))),
                         result("Файл создан в рабочей области.")
                     )
@@ -119,7 +119,7 @@ class PocketPalStructuredAgentRunnerTest {
             )
 
             assertEquals("Файл создан в рабочей области.", final.content)
-            assertEquals("fun hello() = \\"world\\"", workspace.readFile("src/Hello.kt").content)
+            assertEquals("fun hello() = 42", workspace.readFile("src/Hello.kt").content)
             val schemas = engine.requests.first().second.toString()
             assertTrue(schemas.contains("code_read_file"))
             assertTrue(schemas.contains("code_write_file"))
