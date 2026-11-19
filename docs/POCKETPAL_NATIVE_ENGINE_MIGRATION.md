@@ -100,8 +100,9 @@ The consolidated branch now contains:
 - A pinned checkout of PocketPal llama.rn at `ae0e55b7dacdb06d37843273204a3e7ff294a6a2`.
 - A standalone JNI bridge with model load/release, Jinja chat formatting, structured tool-call results, snapshot callback and cancellation.
 - A Kotlin `PocketPalNativeBridge` and `PocketPalStructuredAgentRunner`.
+- JNI multimodal groundwork: projector load/release functions and OpenAI-style `image_url` / `input_audio` message normalization to PocketPal MTMD media markers and local media paths. The Compose Vision flow is not switched to this path yet.
 - `PocketPalLocalProvider` selected by `AgentCoordinator.forContext()` as the primary local text provider.
-- A Compose model lifecycle that keeps the legacy llama.cpp engine unloaded for ordinary text generation and only loads it for the existing Vision path. This avoids loading the same Qwen GGUF into two engines simultaneously.
+- A Compose model lifecycle that keeps the legacy llama.cpp engine unloaded for ordinary text generation and only loads it for the existing Vision path. This avoids loading the same Qwen GGUF into two engines simultaneously. The next cutover is to load SmolVLM and its mmproj through the PocketPal MTMD API, route image requests through the shared local provider, then remove the legacy Vision engine only after CI and device validation.
 - The legacy JSON-envelope runner and legacy local text provider have been removed from the active coordinator path.
 
 GitHub Actions run 44406380286 successfully built and verified both `librnllama.so` and `libjimmy_pocketpal_jni.so` as ARM64/AArch64 shared libraries. The artifact is `pocketpal-rnllama-arm64-cpu`. SHA-256: `librnllama.so` = `798e3e022174aeed0bdac768db30e253398e67fc7b1fec716c8dd06167efa6a7`; `libjimmy_pocketpal_jni.so` = `b575e86269f03c68a89a366d9d4da7a4140f294e2b7957bf6ea1423941172040`. This is a native-library CI build, not an APK build.
