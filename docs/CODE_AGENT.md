@@ -4,7 +4,7 @@ Status: initial sandboxed file tools are wired into the PocketPal structured too
 
 ## Implemented
 
-The local PocketPal provider supplies four structured tools to the text model:
+The local PocketPal provider supplies four structured tools to the text model. In hybrid mode, ordinary code-generation requests can still use Gemini; requests that explicitly target project files/workspaces are routed to the local PocketPal provider so that tool execution remains local.
 
 - `code_list_files`: list files in the private Code Agent workspace.
 - `code_read_file`: read a UTF-8 source/configuration file and return its SHA-256.
@@ -36,7 +36,7 @@ This is the first safe workspace layer, not a complete autonomous IDE:
 5. Compiler/test output ingestion and bounded repair iterations.
 6. UI for selecting the active workspace/project and reviewing changes.
 
-The app does not execute arbitrary shell commands or compile untrusted source code locally. Build and test execution is intended to be delegated to isolated GitHub Actions jobs after the authenticated integration and approval flow are implemented.
+The app does not execute arbitrary shell commands or compile untrusted source code locally. Build and test execution is intended to be delegated to isolated GitHub Actions jobs after the authenticated integration and approval flow are implemented. The current private workspace is initially empty: until the SAF project import/export flow is added, the agent can create and edit files there but cannot inspect an existing repository or the installed app's own source tree.
 
 ## Validation
 
