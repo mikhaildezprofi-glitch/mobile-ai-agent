@@ -383,13 +383,15 @@ class GitHubApiClient(
         fun isAgentBranch(branch: String): Boolean =
             branch.startsWith("code-agent/") && isSafeBranchName(branch)
 
-        fun isSafeBranchName(branch: String): Boolean =
-            branch.length in 1..180 &&
-                !branch.startsWith("/") &&
-                !branch.endsWith("/") &&
-                !branch.contains("..") &&
-                !branch.contains("//") &&
-                branch.matches(Regex("[A-Za-z0-9._/-]+"))
+        fun isSafeBranchName(branch: String): Boolean {
+            if (branch.length !in 1..180 || !branch.matches(Regex("[A-Za-z0-9._/-]+"))) return false
+            if (branch.startsWith("/") || branch.endsWith("/") || branch.contains("..") ||
+                branch.contains("//") || branch.contains("@{")) return false
+            return branch.split('/').all { segment ->
+                segment.isNotBlank() && segment != "." && !segment.startsWith(".") &&
+                    !segment.endsWith(".") && !segment.endsWith(".lock", ignoreCase = true)
+            }
+        }
 
         fun normalizeWorkspacePath(raw: String): String {
             val path = raw.replace('\\', '/')
