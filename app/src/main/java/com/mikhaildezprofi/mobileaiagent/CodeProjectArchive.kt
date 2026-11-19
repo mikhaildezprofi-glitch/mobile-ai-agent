@@ -41,7 +41,7 @@ internal object CodeProjectArchive {
                     }
                     val segments = normalized.split('/')
                     require(segments.size <= MAX_DEPTH) { "Архив содержит слишком глубокий путь." }
-                    if (segments.any { it in EXCLUDED_DIRECTORIES }) {
+                    if (segments.any { it in EXCLUDED_DIRECTORIES || it.startsWith(".jimmy-") }) {
                         val discard = ByteArray(DEFAULT_BUFFER_SIZE)
                         while (true) {
                             val count = zip.read(discard)
