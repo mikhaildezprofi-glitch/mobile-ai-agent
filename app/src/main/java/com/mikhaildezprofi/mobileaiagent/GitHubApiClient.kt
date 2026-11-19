@@ -59,7 +59,7 @@ class GitHubApiException(
  * repository, ref namespace, or workflow path from model-generated tool arguments.
  * Call from Dispatchers.IO; methods are synchronous by design.
  */
-internal fun interface GitHubTokenReader { fun read(): String? }
+fun interface GitHubTokenReader { fun read(): String? }
 
 class GitHubApiClient(
     private val tokenStore: GitHubTokenReader,
