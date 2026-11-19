@@ -1844,11 +1844,20 @@ fun MainScreen() {
                                             require(paths.size <= 100) {
                                                 "В проекте ${paths.size} файлов. GitHub отправка ограничена 100 файлами за один коммит."
                                             }
-                                            paths.map { relative ->
+                                            val prepared = mutableListOf<GitHubWorkspaceFile>()
+                                            var totalBytes = 0L
+                                            paths.forEach { relative ->
                                                 GitHubApiClient.normalizeWorkspacePath(relative)
                                                 val read = workspace.readFile(relative)
-                                                GitHubWorkspaceFile(relative, read.content)
+                                                val fileBytes = read.content.toByteArray(Charsets.UTF_8).size
+                                                require(fileBytes <= 512 * 1024) { "Файл превышает лимит безопасной отправки: $relative" }
+                                                totalBytes += fileBytes
+                                                require(totalBytes <= 5L * 1024 * 1024) {
+                                                    "Общий размер проекта превышает лимит отправки 5 MiB."
+                                                }
+                                                prepared += GitHubWorkspaceFile(relative, read.content)
                                             }
+                                            prepared
                                         }
                                         githubPendingFiles = files
                                         githubPreviewText = buildString {
