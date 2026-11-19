@@ -40,6 +40,19 @@ interface AgentModelProvider {
 
 interface CloudModelProvider : AgentModelProvider
 
+/** Optional local-only media inference capability; raw attachments never enter cloud routing. */
+interface AgentMultimodalModelProvider {
+    fun generateWithImages(
+        prompt: String,
+        imagePaths: List<String>,
+        modelPath: String,
+        projectorPath: String,
+        maxTokens: Int,
+        temperature: Double,
+        systemPrompt: String
+    ): Flow<String>
+}
+
 class AgentCoordinator(
     private val local: AgentModelProvider,
     private val cloud: CloudModelProvider? = null,
@@ -126,6 +139,33 @@ class AgentCoordinator(
                 else -> "Используется локальная модель согласно runtime-маршруту."
             },
             warning = warning
+        )
+    }
+
+    /** Runs image inference locally through PocketPal MTMD; cloud routing is deliberately bypassed. */
+    fun generateWithImages(
+        prompt: String,
+        imagePaths: List<String>,
+        modelPath: String,
+        projectorPath: String,
+        maxTokens: Int,
+        temperature: Double = 0.2,
+        systemPrompt: String = ""
+    ): Flow<String> = flow {
+        require(imagePaths.isNotEmpty()) { "Для анализа не переданы изображения." }
+        val provider = local as? AgentMultimodalModelProvider
+            ?: error("Локальный провайдер не поддерживает мультимодальный ввод.")
+        Log.i(TAG, "task=IMAGE_ANALYSIS, provider=LOCAL, engine=PocketPal MTMD, images=${imagePaths.size}")
+        emitAll(
+            provider.generateWithImages(
+                prompt = prompt,
+                imagePaths = imagePaths,
+                modelPath = modelPath,
+                projectorPath = projectorPath,
+                maxTokens = maxTokens.coerceIn(64, 2048),
+                temperature = temperature.coerceIn(0.0, 2.0),
+                systemPrompt = systemPrompt
+            )
         )
     }
 
