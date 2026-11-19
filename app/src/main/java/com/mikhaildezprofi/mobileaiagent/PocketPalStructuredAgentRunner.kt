@@ -10,7 +10,8 @@ import org.json.JSONObject
 internal class PocketPalStructuredAgentRunner(
     private val bridge: PocketPalGenerationEngine,
     private val registry: AgentTalentRegistry = AgentTalentRegistry.default(),
-    private val maxToolCalls: Int = MAX_TOOL_CALLS
+    private val maxToolCalls: Int = MAX_TOOL_CALLS,
+    private val enableTools: Boolean = true
 ) {
     fun generate(
         messages: JSONArray,
@@ -19,7 +20,7 @@ internal class PocketPalStructuredAgentRunner(
         listener: PocketPalSnapshotListener? = null
     ): PocketPalGenerationResult {
         val workingMessages = JSONArray(messages.toString())
-        val toolSchemas = registry.openAiToolDefinitions()
+        val toolSchemas = if (enableTools) registry.openAiToolDefinitions() else JSONArray()
         var executedCalls = 0
         var toolsEnabled = true
 
@@ -35,6 +36,14 @@ internal class PocketPalStructuredAgentRunner(
 
             if (result.toolCalls.isEmpty()) {
                 return result
+            }
+            if (!enableTools) {
+                return result.copy(
+                    content = result.content.ifBlank {
+                        "Модель вернула вызов инструмента, но инструменты отключены для этого типа модели."
+                    },
+                    toolCalls = emptyList()
+                )
             }
 
             val callIds = result.toolCalls.mapIndexed { index, call ->
