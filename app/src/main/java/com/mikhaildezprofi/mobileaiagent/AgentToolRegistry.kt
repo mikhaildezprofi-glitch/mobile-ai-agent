@@ -81,8 +81,8 @@ class AgentToolRegistry private constructor(private val entries: List<AgentCapab
                 "Дата и время",
                 true,
                 "Текущее время устройства или указанного часового пояса IANA."
-            )
-,            AgentCapability(
+            ),
+            AgentCapability(
                 AgentCapabilityId.CODE_WORKSPACE_FILES,
                 "Рабочая область Code Agent",
                 codeWorkspaceReady,
