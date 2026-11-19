@@ -26,11 +26,14 @@ internal object CodeProjectArchive {
         val staging = File(workspace.root, ".jimmy-import-${UUID.randomUUID()}")
         require(staging.mkdirs()) { "Не удалось создать временный каталог импорта." }
         var files = 0
+        var entries = 0
         var totalBytes = 0L
         try {
             ZipInputStream(input).use { zip ->
                 while (true) {
                     val entry = zip.nextEntry ?: break
+                    entries++
+                    require(entries <= MAX_ENTRIES) { "Архив содержит слишком много записей." }
                     val normalized = normalizeEntryName(entry.name)
                     if (normalized.isBlank()) {
                         zip.closeEntry()
@@ -153,6 +156,7 @@ internal object CodeProjectArchive {
     }
 
     private const val MAX_FILES = 2_000
+    private const val MAX_ENTRIES = 4_000
     private const val MAX_DEPTH = 16
     private const val MAX_FILE_BYTES = 8L * 1024 * 1024
     private const val MAX_TOTAL_BYTES = 50L * 1024 * 1024
