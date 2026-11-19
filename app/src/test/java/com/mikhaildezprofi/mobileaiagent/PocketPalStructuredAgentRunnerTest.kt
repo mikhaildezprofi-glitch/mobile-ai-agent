@@ -89,6 +89,20 @@ class PocketPalStructuredAgentRunnerTest {
     }
 
     @Test
+    fun visionModeDoesNotExposeTextToolSchemas() {
+        val engine = FakeEngine(ArrayDeque(listOf(result("Описание изображения"))))
+
+        val final = PocketPalStructuredAgentRunner(engine, enableTools = false).generate(
+            JSONArray().put(JSONObject().put("role", "user").put("content", "Что на фото?")),
+            maxTokens = 256,
+            temperature = 0.2f
+        )
+
+        assertEquals("Описание изображения", final.content)
+        assertEquals(0, engine.requests.single().second.length())
+    }
+
+    @Test
     fun hardLimitDisablesFurtherToolExecution() {
         val repeated = result(calls = listOf(toolCall("repeat", "datetime", "{}")))
         val engine = FakeEngine(
