@@ -62,6 +62,26 @@ class AgentCoordinatorTest {
     }
 
     @Test
+    fun hybridModeRoutesPlainCodeGenerationToCloud() {
+        val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
+
+        val route = coordinator.route("Напиши код на Kotlin", hybridMode = true)
+
+        assertEquals(AgentTaskKind.CODE, route.task)
+        assertEquals(AgentProviderKind.CLOUD, route.provider)
+    }
+
+    @Test
+    fun hybridModeRoutesProjectFileEditsToLocalCodeTools() {
+        val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
+
+        val route = coordinator.route("Исправь файл MainActivity.kt в проекте", hybridMode = true)
+
+        assertEquals(AgentTaskKind.CODE, route.task)
+        assertEquals(AgentProviderKind.LOCAL, route.provider)
+    }
+
+    @Test
     fun localModeNeverRoutesToCloud() {
         val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
 
