@@ -1874,7 +1874,6 @@ fun MainScreen() {
                                             }
                                             val workspace = CodeWorkspace(project)
                                             val paths = workspace.listFiles(maxDepth = 8, maxFiles = 500)
-                                            require(paths.isNotEmpty()) { "В проекте нет файлов." }
                                             require(paths.size <= 100) {
                                                 "В проекте ${paths.size} файлов. GitHub отправка ограничена 100 файлами за один коммит."
                                             }
@@ -1899,6 +1898,9 @@ fun MainScreen() {
                                         val previouslyManaged = managedKey?.let { prefs.getStringSet(it, emptySet())?.toSet() }.orEmpty()
                                         val currentPaths = files.map { it.path }.toSet()
                                         val deletions = previouslyManaged.filterNot { it in currentPaths }.sorted()
+                                        require(files.isNotEmpty() || deletions.isNotEmpty()) {
+                                            "Проект пуст и в этой ветке нет ранее синхронизированных файлов для удаления."
+                                        }
                                         githubPendingFiles = files
                                         githubPendingDeletePaths = deletions
                                         githubDeleteConfirmed = false
