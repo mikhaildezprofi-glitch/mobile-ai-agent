@@ -170,7 +170,8 @@ class AgentCoordinatorTest {
 
         try {
             firstCoordinator.executePlan(
-                plan, maxTokensPerStep = 256, hybridMode = true
+                plan, maxTokensPerStep = 256, hybridMode = true,
+                routing = AgentRoutingConfig(fallbackToLocal = false)
             ).toList()
             throw AssertionError("CancellationException was expected")
         } catch (_: CancellationException) {
