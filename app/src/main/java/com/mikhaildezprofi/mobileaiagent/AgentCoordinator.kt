@@ -59,7 +59,8 @@ class AgentCoordinator(
     private val allowCloud: Boolean = true,
     private val planExecutionMutex: Mutex = Mutex(),
     private val executorRegistry: AgentExecutorRegistry = AgentExecutorRegistry.default(),
-    private val taskStore: AgentTaskPersistence? = null
+    private val taskStore: AgentTaskPersistence? = null,
+    private val retryPolicy: AgentStepRetryPolicy = AgentStepRetryPolicy()
 ) {
     fun capabilities(): List<AgentCapability> = AgentToolRegistry.forRuntime(
         localReady = local.isAvailable,
@@ -369,14 +370,33 @@ class AgentCoordinator(
                         appendLine("Текущее задание: ${step.prompt}")
                         append("Выполни только это задание. Не утверждай, что внешние действия выполнены, если они не запускались и не проверялись.")
                     }
-                    val result = StringBuilder()
-                    executorRegistry.resolve(step.agentRole).execute(stepPrompt, maxTokensPerStep) { specializedPrompt, tokenLimit ->
-                        generate(specializedPrompt, tokenLimit, hybridMode, routing, systemPrompt, temperature)
-                    }.collect { chunk ->
-                        result.append(chunk)
-                        emit(AgentTaskEvent.StepOutput(step.id, chunk))
+                    var completed = ""
+                    var attempt = 1
+                    var lastError: Exception? = null
+                    while (attempt <= retryPolicy.maxAttempts) {
+                        val attemptPrompt = if (lastError == null) stepPrompt else {
+                            retryPolicy.buildCorrectionPrompt(stepPrompt, attempt - 1, lastError!!)
+                        }
+                        val attemptOutput = StringBuilder()
+                        try {
+                            executorRegistry.resolve(step.agentRole).execute(attemptPrompt, maxTokensPerStep) { specializedPrompt, tokenLimit ->
+                                generate(specializedPrompt, tokenLimit, hybridMode, routing, systemPrompt, temperature)
+                            }.collect { chunk -> attemptOutput.append(chunk) }
+                            completed = attemptOutput.toString()
+                            break
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            lastError = error
+                            taskStore?.setStepStatus(plan.id, step.id, AgentStepStatus.RUNNING,
+                                "Попытка $attempt/${retryPolicy.maxAttempts}: ${error.message ?: error.javaClass.simpleName}".take(1_200))
+                            if (!retryPolicy.shouldRetry(attempt, error)) throw error
+                            attempt += 1
+                        }
                     }
-                    val completed = result.toString()
+                    completed.lineSequence().forEach { line ->
+                        emit(AgentTaskEvent.StepOutput(step.id, "$line\n"))
+                    }
                     results[step.id] = completed
                     taskStore?.completeStep(plan.id, step.id, completed)
                     activeStepId = null
