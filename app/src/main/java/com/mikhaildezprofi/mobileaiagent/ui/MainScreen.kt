@@ -336,11 +336,23 @@ fun MainScreen() {
     }
     var codeProjectStatus by remember { mutableStateOf("Импортируйте ZIP-архив проекта в приватную рабочую область Джимми.") }
     var githubProjectBusy by remember { mutableStateOf(false) }
-    var githubWorkingBranch by remember { mutableStateOf<GitHubWorkingBranch?>(null) }
+    var githubWorkingBranch by remember(appContext) {
+        val prefs = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+        val name = prefs.getString("github_working_branch", null)
+        val base = prefs.getString("github_working_base", null)
+        val sha = prefs.getString("github_working_sha", null)
+        mutableStateOf(
+            if (name != null && base != null && sha != null &&
+                GitHubApiClient.isAgentBranch(name) && GitHubApiClient.isSafeBranchName(base) &&
+                sha.matches(Regex("[a-fA-F0-9]{40}"))) {
+                GitHubWorkingBranch(name, base, sha)
+            } else null
+        )
+    }
     var githubPendingFiles by remember { mutableStateOf<List<GitHubWorkspaceFile>>(emptyList()) }
     var githubPreviewText by remember { mutableStateOf("") }
     var githubProjectStatus by remember { mutableStateOf("") }
-    var githubLastRunId by remember { mutableStateOf<Long?>(null) }
+    var githubLastRunId by remember(appContext) { mutableStateOf(appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE).getLong("github_last_run_id", 0L).takeIf { it > 0L }) }
     var selectedTaskPlan by remember { mutableStateOf<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan?>(null) }
     var planPendingDeletion by remember { mutableStateOf<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan?>(null) }
     var agentTaskHistory by remember { mutableStateOf<List<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan>>(emptyList()) }
@@ -1813,6 +1825,12 @@ fun MainScreen() {
                                             GitHubApiClient(githubTokenStore).createWorkingBranch()
                                         }
                                         githubWorkingBranch = working
+                                        appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE).edit()
+                                            .putString("github_working_branch", working.name)
+                                            .putString("github_working_base", working.baseBranch)
+                                            .putString("github_working_sha", working.baseSha)
+                                            .remove("github_last_run_id")
+                                            .apply()
                                         githubPendingFiles = emptyList()
                                         githubPreviewText = ""
                                         githubLastRunId = null
@@ -1896,7 +1914,11 @@ fun MainScreen() {
                                             message = "Code Agent: update ${codeProjectName.trim()}"
                                         )
                                     }
-                                    githubWorkingBranch = working.copy(baseSha = committed.commitSha)
+                                    val updatedBranch = working.copy(baseSha = committed.commitSha)
+                                    githubWorkingBranch = updatedBranch
+                                    appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE).edit()
+                                        .putString("github_working_sha", updatedBranch.baseSha)
+                                        .apply()
                                     githubPendingFiles = emptyList()
                                     githubProjectStatus = "Отправлено: ${committed.changedFiles} файлов. Commit ${committed.commitSha.take(12)}. Запускаю unit-тесты…"
                                     withContext(Dispatchers.IO) {
@@ -1910,6 +1932,8 @@ fun MainScreen() {
                                     }
                                     if (run != null) {
                                         githubLastRunId = run.id
+                                        appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE).edit()
+                                            .putLong("github_last_run_id", run.id).apply()
                                         githubProjectStatus = "Unit-тесты: ${run.status}${run.conclusion?.let { " / $it" } ?: ""}. Run #${run.id}."
                                     } else {
                                         githubProjectStatus = "Запуск принят GitHub. Результат пока не появился; нажмите «Обновить статус тестов» позже."
@@ -1936,6 +1960,8 @@ fun MainScreen() {
                                         githubProjectStatus = "GitHub пока не вернул запуск для этой ветки."
                                     } else {
                                         githubLastRunId = run.id
+                                        appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE).edit()
+                                            .putLong("github_last_run_id", run.id).apply()
                                         githubProjectStatus = "Run #${run.id}: ${run.status}${run.conclusion?.let { " / $it" } ?: ""}. ${run.htmlUrl}"
                                     }
                                 } catch (error: Exception) {
