@@ -59,8 +59,11 @@ class GitHubApiException(
  * repository, ref namespace, or workflow path from model-generated tool arguments.
  * Call from Dispatchers.IO; methods are synchronous by design.
  */
+internal fun interface GitHubTokenReader { fun read(): String? }
+
 class GitHubApiClient(
-    private val tokenStore: GitHubTokenStore
+    private val tokenStore: GitHubTokenReader,
+    private val connectionFactory: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection }
 ) {
     private val owner = DEFAULT_OWNER
     private val repository = DEFAULT_REPOSITORY
@@ -253,7 +256,7 @@ class GitHubApiClient(
      * to that second request, because the redirect host is outside api.github.com.
      */
     private fun downloadAndExtractJobLogs(location: String): String {
-        val connection = (URL(location).openConnection() as HttpURLConnection).apply {
+        val connection = connectionFactory(URL(location)).apply {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
@@ -329,7 +332,7 @@ class GitHubApiClient(
             "Запрос за пределы настроенного репозитория запрещён."
         }
         val token = tokenStore.read() ?: throw IllegalStateException("GitHub-токен не настроен или не читается.")
-        val connection = (URL("https://api.github.com$path").openConnection() as HttpURLConnection)
+        val connection = connectionFactory(URL("https://api.github.com$path"))
         connection.requestMethod = method
         connection.connectTimeout = CONNECT_TIMEOUT_MS
         connection.readTimeout = READ_TIMEOUT_MS
