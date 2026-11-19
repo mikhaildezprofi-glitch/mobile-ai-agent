@@ -131,6 +131,33 @@ internal class CodeWorkspace(rootDirectory: File) {
         return sha256(file.readBytes())
     }
 
+    /**
+     * Replace one exact text fragment in a previously-read file.
+     * Requiring a unique match and the current SHA-256 prevents ambiguous or stale edits.
+     */
+    fun replaceText(
+        relativePath: String,
+        expectedSha256: String,
+        oldText: String,
+        newText: String
+    ): String {
+        require(oldText.isNotEmpty()) { "Фрагмент для замены пуст." }
+        require(oldText.length <= MAX_FILE_BYTES && newText.length <= MAX_FILE_BYTES) {
+            "Фрагмент превышает допустимый размер."
+        }
+        val current = readFile(relativePath)
+        require(current.sha256.equals(expectedSha256, ignoreCase = true)) {
+            "Файл изменился после чтения. Прочитайте актуальную версию перед заменой."
+        }
+        val first = current.content.indexOf(oldText)
+        require(first >= 0) { "Исходный фрагмент не найден. Файл не изменён." }
+        require(current.content.indexOf(oldText, first + oldText.length) < 0) {
+            "Фрагмент встречается несколько раз. Уточните контекст, чтобы избежать неоднозначной замены."
+        }
+        val updated = current.content.replaceRange(first, first + oldText.length, newText)
+        return writeFile(relativePath, updated, current.sha256)
+    }
+
     private fun resolve(relativePath: String, allowEmpty: Boolean = false): File {
         require(relativePath.indexOf('\u0000') < 0) { "Путь содержит недопустимый символ." }
         require(!relativePath.startsWith("/") && !relativePath.startsWith("\\")) {
