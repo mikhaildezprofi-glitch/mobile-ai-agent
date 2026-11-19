@@ -14,5 +14,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "MOBILE_AI_AGENT"
-include(":app", ":llama")
-project(":llama").projectDir = file("third_party/llama.cpp/examples/llama.android/lib")
+include(":app")
