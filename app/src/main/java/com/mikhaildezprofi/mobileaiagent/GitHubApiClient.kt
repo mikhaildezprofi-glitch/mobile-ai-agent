@@ -3,7 +3,9 @@ package com.mikhaildezprofi.mobileaiagent
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.util.zip.ZipInputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -229,14 +231,65 @@ class GitHubApiClient(
             "/repos/$owner/$repository/actions/jobs/$jobId/logs"
         )
         val status = connection.responseCode
+        if (status in 300..399) {
+            val location = connection.getHeaderField("Location")
+            connection.disconnect()
+            require(!location.isNullOrBlank() && location.startsWith("https://")) {
+                "GitHub не вернул безопасную HTTPS-ссылку на архив журналов."
+            }
+            return downloadAndExtractJobLogs(location)
+        }
         if (status !in 200..299) {
             val body = readBounded(connection.errorStream, MAX_RESPONSE_BYTES)
             connection.disconnect()
             throw GitHubApiException(status, "Не удалось получить журнал GitHub Actions.", body)
         }
-        val body = readBounded(connection.inputStream, MAX_LOG_BYTES)
+        val bytes = readBoundedBytes(connection.inputStream, MAX_LOG_BYTES)
         connection.disconnect()
-        return body
+        return extractJobLogArchive(bytes)
+    }
+
+    /**
+     * GitHub redirects job logs to a short-lived signed URL. The PAT is deliberately not copied
+     * to that second request, because the redirect host is outside api.github.com.
+     */
+    private fun downloadAndExtractJobLogs(location: String): String {
+        val connection = (URL(location).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = CONNECT_TIMEOUT_MS
+            readTimeout = READ_TIMEOUT_MS
+            instanceFollowRedirects = false
+            setRequestProperty("Accept", "application/zip")
+        }
+        try {
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                throw GitHubApiException(status, "Не удалось скачать архив журналов GitHub Actions.")
+            }
+            return extractJobLogArchive(readBoundedBytes(connection.inputStream, MAX_LOG_BYTES))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun extractJobLogArchive(archive: ByteArray): String {
+        val output = StringBuilder()
+        ZipInputStream(ByteArrayInputStream(archive)).use { zip ->
+            var entries = 0
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                if (entry.isDirectory) continue
+                entries++
+                require(entries <= MAX_LOG_ENTRIES) { "В архиве слишком много файлов журналов." }
+                val bytes = readBoundedBytes(zip, MAX_LOG_ENTRY_BYTES)
+                if (output.isNotEmpty()) output.append('\\n')
+                output.append("===== ").append(entry.name.take(160)).append(" =====\\n")
+                output.append(bytes.toString(Charsets.UTF_8))
+                require(output.length <= MAX_LOG_TEXT_CHARS) { "Распакованный журнал превышает лимит." }
+                zip.closeEntry()
+            }
+        }
+        return output.toString()
     }
 
     fun compareBranchWithBase(baseBranch: String, headBranch: String): String {
@@ -281,6 +334,7 @@ class GitHubApiClient(
         connection.requestMethod = method
         connection.connectTimeout = CONNECT_TIMEOUT_MS
         connection.readTimeout = READ_TIMEOUT_MS
+        connection.instanceFollowRedirects = false
         connection.setRequestProperty("Authorization", "Bearer $token")
         connection.setRequestProperty("Accept", "application/vnd.github+json")
         connection.setRequestProperty("X-GitHub-Api-Version", API_VERSION)
@@ -288,21 +342,22 @@ class GitHubApiClient(
         return connection
     }
 
-    private fun readBounded(stream: java.io.InputStream?, maxBytes: Int): String {
-        if (stream == null) return ""
-        stream.use { input ->
-            val output = ByteArrayOutputStream()
-            val buffer = ByteArray(8192)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                if (output.size() + count > maxBytes) {
-                    throw IllegalStateException("Ответ GitHub превышает допустимый размер.")
-                }
-                output.write(buffer, 0, count)
+    private fun readBounded(stream: java.io.InputStream?, maxBytes: Int): String =
+        readBoundedBytes(stream, maxBytes).toString(Charsets.UTF_8)
+
+    private fun readBoundedBytes(stream: java.io.InputStream?, maxBytes: Int): ByteArray {
+        if (stream == null) return ByteArray(0)
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        while (true) {
+            val count = stream.read(buffer)
+            if (count < 0) break
+            if (output.size() + count > maxBytes) {
+                throw IllegalStateException("Ответ GitHub превышает допустимый размер.")
             }
-            return output.toString(Charsets.UTF_8.name())
+            output.write(buffer, 0, count)
         }
+        return output.toByteArray()
     }
 
     companion object {
@@ -318,6 +373,9 @@ class GitHubApiClient(
         private const val MAX_TOTAL_BYTES = 5 * 1024 * 1024
         private const val MAX_RESPONSE_BYTES = 2 * 1024 * 1024
         private const val MAX_LOG_BYTES = 5 * 1024 * 1024
+        private const val MAX_LOG_ENTRY_BYTES = 2 * 1024 * 1024
+        private const val MAX_LOG_ENTRIES = 50
+        private const val MAX_LOG_TEXT_CHARS = 5 * 1024 * 1024
 
         fun isAgentBranch(branch: String): Boolean =
             branch.startsWith("code-agent/") && isSafeBranchName(branch)
