@@ -1118,52 +1118,31 @@ fun MainScreen() {
                             "Извлечение кадров видео отключено в настройках."
                         }
                     }
-                    val visionEngine = activeEngine as? VisionInferenceEngine
-                        ?: error("Текущая нативная сборка не поддерживает Vision-модель.")
-                    val modelPreferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
-                    val currentlySelected = modelPreferences.getString("model_path", null)?.let { File(it) }
-                    val textModelFile = currentlySelected?.takeIf {
-                        it.isFile && it.canRead() && !it.name.contains("SmolVLM", ignoreCase = true)
-                    } ?: qwenModelFile.takeIf { it.isFile && it.canRead() }
-                    check(textModelFile != null) {
-                        "Не найдена локальная языковая модель для возврата после Vision-анализа. Сначала выберите Qwen."
-                    }
-
-                    val visionAlreadyReady = visionEngine.isVisionReady()
-                    var visionModelActivated = false
                     var stagedImages: com.mikhaildezprofi.mobileaiagent.StagedImageFiles? = null
                     val extractedVideoFrames = mutableListOf<ImageAttachmentSource>()
                     val visionSummary = StringBuilder()
                     try {
-                        if (!visionAlreadyReady) {
-                            visionDownloadBusy = true
-                            visionDownloadProgress = 0f
-                            visionDownloadStatus = "Автоматическая подготовка Vision-модели…"
-                            status = "Координатор подключает Vision-модель для фото/видео…"
-                            val assets = VisionModelAssets.download(appContext) { progress ->
-                                withContext(Dispatchers.Main) {
-                                    visionDownloadProgress = progress.fraction
-                                    val currentMb = progress.fileBytes / (1024L * 1024L)
-                                    val totalMb = progress.fileTotalBytes / (1024L * 1024L)
-                                    val overallMb = progress.completedBytes / (1024L * 1024L)
-                                    val overallTotalMb = progress.totalBytes / (1024L * 1024L)
-                                    visionDownloadStatus =
-                                        "${progress.fileName}: $currentMb / $totalMb МБ • всего $overallMb / $overallTotalMb МБ"
-                                }
+                        visionDownloadBusy = true
+                        visionDownloadProgress = 0f
+                        visionDownloadStatus = "Проверка и подготовка PocketPal Vision-модели…"
+                        status = "Координатор подготавливает локальный PocketPal MTMD…"
+                        val assets = VisionModelAssets.download(appContext) { progress ->
+                            withContext(Dispatchers.Main) {
+                                visionDownloadProgress = progress.fraction
+                                val currentMb = progress.fileBytes / (1024L * 1024L)
+                                val totalMb = progress.fileTotalBytes / (1024L * 1024L)
+                                val overallMb = progress.completedBytes / (1024L * 1024L)
+                                val overallTotalMb = progress.totalBytes / (1024L * 1024L)
+                                visionDownloadStatus =
+                                    "${progress.fileName}: $currentMb / $totalMb МБ • всего $overallMb / $overallTotalMb МБ"
                             }
-                            visionDownloadStatus = "Файлы Vision проверены. Переключаю движок…"
-                            visionModelActivated = true
-                            activateModelFileNow(assets.model, assets.projector)
-                            visionDownloadStatus = "Vision-модель автоматически загружена."
-                        } else {
-                            val selectedIsVision = currentlySelected?.name?.contains("SmolVLM", ignoreCase = true) == true
-                            visionModelActivated = selectedIsVision
                         }
+                        visionDownloadStatus = "Файлы Vision проверены по SHA-256. Загружаю PocketPal…"
 
                         status = if (hasVideoAttachment) {
-                            "Извлечение ключевых кадров видео и анализ…"
+                            "Извлечение ключевых кадров видео и анализ через PocketPal…"
                         } else {
-                            "Локальный анализ фото…"
+                            "Локальный анализ фото через PocketPal…"
                         }
                         val selectedImageSources = imageSources.take(if (hasVideoAttachment) 3 else 4)
                         var remainingFrames = (4 - selectedImageSources.size).coerceAtLeast(0)
@@ -1182,41 +1161,39 @@ fun MainScreen() {
                             "Не удалось получить изображения или кадры из выбранного видео."
                         }
                         val videoNote = if (hasVideoAttachment) {
-                            "\n\nВидео представлено ${extractedVideoFrames.size} ключевыми кадрами. Не делай выводов о промежутках между кадрами."
+                            "
+
+Видео представлено ${extractedVideoFrames.size} ключевыми кадрами. Не делай выводов о промежутках между кадрами."
                         } else ""
                         val omittedImages = imageSources.size - selectedImageSources.size
                         val imageLimitNote = if (omittedImages > 0) {
-                            "\n\nДля одного запроса выбраны первые ${selectedImageSources.size} фото; ещё $omittedImages фото пропущено из-за лимита обработки."
+                            "
+
+Для одного запроса выбраны первые ${selectedImageSources.size} фото; ещё $omittedImages фото пропущено из-за лимита обработки."
                         } else ""
                         stagedImages = ImageAttachmentStager.stage(appContext, visualSources)
                         withContext(Dispatchers.IO) {
-                            visionEngine.sendUserPromptWithImages(
-                                message = effectivePrompt + imageLimitNote + videoNote,
+                            coordinator.generateWithImages(
+                                prompt = effectivePrompt + imageLimitNote + videoNote,
                                 imagePaths = stagedImages!!.files.map { it.absolutePath },
-                                predictLength = minOf(
+                                modelPath = assets.model.absolutePath,
+                                projectorPath = assets.projector.absolutePath,
+                                maxTokens = minOf(
                                     1024, runtimeConfig.maxOutputTokens, runtimeConfig.routing.localMaxTokens
-                                )
+                                ),
+                                temperature = runtimeConfig.temperature,
+                                systemPrompt = systemPrompt
                             ).collect { token -> visionSummary.append(token) }
                         }
                         check(visionSummary.isNotBlank()) {
-                            "Vision-модель не вернула описание содержимого."
+                            "PocketPal Vision-модель не вернула описание содержимого."
                         }
+                        visionDownloadStatus = "PocketPal Vision-анализ завершён."
                     } finally {
                         stagedImages?.close()
                         extractedVideoFrames.forEach { source ->
                             source.bitmap?.let { bitmap ->
                                 if (!bitmap.isRecycled) bitmap.recycle()
-                            }
-                        }
-                        if (visionModelActivated) {
-                            status = "Vision-анализ завершён. Возвращаю локальную языковую модель…"
-                            try {
-                                activateModelFileNow(textModelFile!!, null)
-                            } catch (restoreError: Exception) {
-                                throw IllegalStateException(
-                                    "Vision-анализ выполнен, но не удалось вернуть языковую модель ${textModelFile!!.name}: ${restoreError.message}",
-                                    restoreError
-                                )
                             }
                         }
                         visionDownloadBusy = false
