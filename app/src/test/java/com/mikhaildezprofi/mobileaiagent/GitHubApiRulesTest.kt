@@ -12,7 +12,7 @@ class GitHubApiRulesTest {
     }
 
     @Test fun rejectsTraversalAndMalformedBranchNames() {
-        listOf("code-agent/../main", "code-agent//bad", "code-agent/name/", "code-agent/a b")
+        listOf("code-agent/../main", "code-agent//bad", "code-agent/name/", "code-agent/a b", "code-agent/.", "code-agent/.hidden", "code-agent/name.lock", "code-agent/a@{b}")
             .forEach { branch ->
                 assertEquals(false, GitHubApiClient.isAgentBranch(branch))
             }
