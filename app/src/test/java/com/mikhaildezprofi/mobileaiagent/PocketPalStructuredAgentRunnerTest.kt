@@ -6,6 +6,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
+import java.nio.file.Files
 
 class PocketPalStructuredAgentRunnerTest {
     private class FakeEngine(
@@ -86,6 +88,47 @@ class PocketPalStructuredAgentRunnerTest {
         assertFalse(firstId == secondId)
         assertEquals(firstId, continuation.getJSONObject(2).getString("tool_call_id"))
         assertEquals(secondId, continuation.getJSONObject(3).getString("tool_call_id"))
+    }
+
+    @Test
+    fun codeAgentToolWritesOnlyInsideWorkspaceAndReturnsResultToModel() {
+        val root = Files.createTempDirectory("jimmy-code-agent-runner").toFile()
+        try {
+            val workspace = CodeWorkspace(root)
+            val codeTools = CodeAgentToolRegistry(workspace)
+            val engine = FakeEngine(
+                ArrayDeque(
+                    listOf(
+                        result(calls = listOf(toolCall(
+                            "code_call_1",
+                            "code_write_file",
+                            """{"path":"src/Hello.kt","content":"fun hello() = \\"world\\""}"""
+                        ))),
+                        result("Файл создан в рабочей области.")
+                    )
+                )
+            )
+
+            val final = PocketPalStructuredAgentRunner(
+                engine,
+                codeTools = codeTools
+            ).generate(
+                JSONArray().put(JSONObject().put("role", "user").put("content", "Создай файл Hello.kt")),
+                maxTokens = 256,
+                temperature = 0.2f
+            )
+
+            assertEquals("Файл создан в рабочей области.", final.content)
+            assertEquals("fun hello() = \\"world\\"", workspace.readFile("src/Hello.kt").content)
+            val schemas = engine.requests.first().second.toString()
+            assertTrue(schemas.contains("code_read_file"))
+            assertTrue(schemas.contains("code_write_file"))
+            val toolReply = engine.requests[1].first.getJSONObject(2)
+            assertEquals("tool", toolReply.getString("role"))
+            assertTrue(toolReply.getString("content").contains("saved_in_private_workspace"))
+        } finally {
+            root.deleteRecursively()
+        }
     }
 
     @Test
