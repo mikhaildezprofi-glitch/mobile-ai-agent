@@ -1023,18 +1023,33 @@ fun MainScreen() {
                         visionDownloadProgress = 0f
                         visionDownloadStatus = "Проверка и подготовка PocketPal Vision-модели…"
                         status = "Координатор подготавливает локальный PocketPal MTMD…"
-                        val assets = VisionModelAssets.download(appContext) { progress ->
-                            withContext(Dispatchers.Main) {
-                                visionDownloadProgress = progress.fraction
-                                val currentMb = progress.fileBytes / (1024L * 1024L)
-                                val totalMb = progress.fileTotalBytes / (1024L * 1024L)
-                                val overallMb = progress.completedBytes / (1024L * 1024L)
-                                val overallTotalMb = progress.totalBytes / (1024L * 1024L)
-                                visionDownloadStatus =
-                                    "${progress.fileName}: $currentMb / $totalMb МБ • всего $overallMb / $overallTotalMb МБ"
+                        val modelPreferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+                        val savedVisionModel = modelPreferences.getString("vision_model_path", null)?.let { File(it) }
+                        val savedProjector = modelPreferences.getString("vision_mmproj_path", null)?.let { File(it) }
+                        val officialModel = VisionModelAssets.modelFile(appContext)
+                        val useSelectedPair = savedVisionModel?.isFile == true &&
+                            savedVisionModel.canRead() && savedProjector?.isFile == true &&
+                            savedProjector.canRead() && savedVisionModel.absolutePath != officialModel.absolutePath
+                        val assets = if (useSelectedPair) {
+                            VisionModelAssets.Assets(savedVisionModel!!, savedProjector!!)
+                        } else {
+                            VisionModelAssets.download(appContext) { progress ->
+                                withContext(Dispatchers.Main) {
+                                    visionDownloadProgress = progress.fraction
+                                    val currentMb = progress.fileBytes / (1024L * 1024L)
+                                    val totalMb = progress.fileTotalBytes / (1024L * 1024L)
+                                    val overallMb = progress.completedBytes / (1024L * 1024L)
+                                    val overallTotalMb = progress.totalBytes / (1024L * 1024L)
+                                    visionDownloadStatus =
+                                        "${progress.fileName}: $currentMb / $totalMb МБ • всего $overallMb / $overallTotalMb МБ"
+                                }
                             }
                         }
-                        visionDownloadStatus = "Файлы Vision проверены по SHA-256. Загружаю PocketPal…"
+                        modelPreferences.edit()
+                            .putString("vision_model_path", assets.model.absolutePath)
+                            .putString("vision_mmproj_path", assets.projector.absolutePath)
+                            .apply()
+                        visionDownloadStatus = "Файлы Vision проверены. Загружаю PocketPal…"
 
                         status = if (hasVideoAttachment) {
                             "Извлечение ключевых кадров видео и анализ через PocketPal…"
