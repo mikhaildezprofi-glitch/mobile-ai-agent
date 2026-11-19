@@ -2,6 +2,8 @@ package com.mikhaildezprofi.mobileaiagent
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -23,6 +25,29 @@ class AgentCoordinatorTest {
         override val isAvailable: Boolean = available
         override fun generate(prompt: String, maxTokens: Int): Flow<String> =
             flowOf("cloud:$prompt")
+    }
+
+    private class FakeMultimodalProvider : AgentModelProvider, AgentMultimodalModelProvider {
+        override val id: String = "fake-pocketpal"
+        override val isAvailable: Boolean = true
+        var receivedPaths: List<String> = emptyList()
+        var receivedModelPath: String = ""
+
+        override fun generate(prompt: String, maxTokens: Int): Flow<String> = flowOf("text:$prompt")
+
+        override fun generateWithImages(
+            prompt: String,
+            imagePaths: List<String>,
+            modelPath: String,
+            projectorPath: String,
+            maxTokens: Int,
+            temperature: Double,
+            systemPrompt: String
+        ): Flow<String> {
+            receivedPaths = imagePaths
+            receivedModelPath = modelPath
+            return flowOf("vision:$prompt")
+        }
     }
 
     @Test
@@ -133,6 +158,25 @@ class AgentCoordinatorTest {
 
         assertEquals(AgentTaskKind.GENERAL, route.task)
         assertEquals(AgentProviderKind.CLOUD, route.provider)
+    }
+
+    @Test
+    fun imageInferenceUsesLocalMultimodalProviderAndNeverCloud() = runBlocking {
+        val local = FakeMultimodalProvider()
+        val coordinator = AgentCoordinator(local, FakeCloudProvider())
+
+        val output = coordinator.generateWithImages(
+            prompt = "Опиши изображение",
+            imagePaths = listOf("/tmp/photo-1.jpg", "/tmp/photo-2.jpg"),
+            modelPath = "/models/SmolVLM.gguf",
+            projectorPath = "/models/mmproj.gguf",
+            maxTokens = 512,
+            systemPrompt = "Отвечай кратко"
+        ).toList()
+
+        assertEquals(listOf("vision:Опиши изображение"), output)
+        assertEquals(listOf("/tmp/photo-1.jpg", "/tmp/photo-2.jpg"), local.receivedPaths)
+        assertEquals("/models/SmolVLM.gguf", local.receivedModelPath)
     }
 
     @Test
