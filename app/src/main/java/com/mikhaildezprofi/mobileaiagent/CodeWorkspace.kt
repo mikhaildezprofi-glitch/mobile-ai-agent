@@ -2,6 +2,8 @@ package com.mikhaildezprofi.mobileaiagent
 
 import java.io.File
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
 /**
@@ -110,8 +112,12 @@ internal class CodeWorkspace(rootDirectory: File) {
         val temp = File(file.parentFile, ".jimmy-${file.name}.tmp")
         try {
             temp.writeText(content, StandardCharsets.UTF_8)
-            if (file.exists() && !file.delete()) error("Не удалось заменить старую версию файла.")
-            if (!temp.renameTo(file)) error("Не удалось атомарно сохранить файл.")
+            Files.move(
+                temp.toPath(),
+                file.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE
+            )
         } finally {
             if (temp.exists()) temp.delete()
         }
