@@ -1,6 +1,6 @@
 # PocketPal native engine migration for Jimmy
 
-Status: native core and Jimmy-owned JNI adapter both compile successfully for ARM64 in GitHub Actions. They are not yet assembled into an APK or runtime-tested on the Exynos device.
+Status: PocketPal text and Vision/MTMD paths are wired into the Android coordinator and Compose chat. ARM64 native core/JNI and JVM regression tests pass in GitHub Actions. No APK has been built and the app has not yet been runtime-tested on the Exynos device.
 
 ## Decision
 
@@ -84,9 +84,11 @@ The Kotlin layer must assemble fragmented tool-call arguments safely, validate t
 - Ensure tool results are returned to the model as structured tool messages, not concatenated into an ambiguous prompt.
 
 ### Stage D — feature enablement
-- Add image/audio projector loading and multimodal message handling.
-- Add model-specific sampler/context settings and memory-aware defaults.
-- Evaluate context checkpointing and speculative decoding only after correctness and memory tests.
+- **Implemented:** PocketPal JNI projector load/release and OpenAI-style `image_url` conversion to MTMD media markers/paths.
+- **Implemented:** Compose photo/video flow now calls `AgentCoordinator.generateWithImages`; raw image paths stay local and the text summary alone can be cloud-routed.
+- **Implemented:** `PocketPalLocalProvider` keeps one native context and switches between Qwen and SmolVLM+mmproj, releasing the prior model before loading the next.
+- **Not enabled:** audio input. The current vision projector rejects `input_audio` explicitly; audio requires a compatible model/projector path.
+- Model-specific sampler/context settings, context checkpoints and speculative decoding remain future work after correctness and memory tests.
 - Enable any hardware backend only after verified device capability detection.
 
 ### Stage E — cutover
@@ -98,15 +100,15 @@ The Kotlin layer must assemble fragmented tool-call arguments safely, validate t
 
 The consolidated branch now contains:
 - A pinned checkout of PocketPal llama.rn at `ae0e55b7dacdb06d37843273204a3e7ff294a6a2`.
-- A standalone JNI bridge with model load/release, Jinja chat formatting, structured tool-call results, snapshot callback and cancellation.
+- A standalone JNI bridge with model load/release, Jinja chat formatting, structured tool-call results, snapshot callback, cancellation and MTMD projector/media handling.
 - A Kotlin `PocketPalNativeBridge` and `PocketPalStructuredAgentRunner`.
 - JNI multimodal support: projector load/release functions and OpenAI-style `image_url` normalization to PocketPal MTMD media markers and local media paths. Audio input is explicitly rejected until a compatible audio projector/model is added.
 - `PocketPalLocalProvider` selected by `AgentCoordinator.forContext()` as the primary local text provider.
-- A Compose model lifecycle that keeps the legacy llama.cpp engine unloaded for ordinary text generation and only loads it for the existing Vision path. This avoids loading the same Qwen GGUF into two engines simultaneously. The next cutover is to load SmolVLM and its mmproj through the PocketPal MTMD API, route image requests through the shared local provider, then remove the legacy Vision engine only after CI and device validation.
+- A Compose model lifecycle that routes both text and image/video inference through PocketPal. The shared provider keeps only one GGUF context alive: it loads Qwen for text, switches to SmolVLM+mmproj for vision, then reloads Qwen on the next text request. The legacy `:llama` Gradle module and old llama.cpp workflow checkout/diagnostics patch have been removed; the old source reference remains only as an unbuilt rollback snapshot.
 - The legacy JSON-envelope runner and legacy local text provider have been removed from the active coordinator path.
 
-GitHub Actions run 44406380286 successfully built and verified both `librnllama.so` and `libjimmy_pocketpal_jni.so` as ARM64/AArch64 shared libraries. The artifact is `pocketpal-rnllama-arm64-cpu`. SHA-256: `librnllama.so` = `798e3e022174aeed0bdac768db30e253398e67fc7b1fec716c8dd06167efa6a7`; `libjimmy_pocketpal_jni.so` = `b575e86269f03c68a89a366d9d4da7a4140f294e2b7957bf6ea1423941172040`. This is a native-library CI build, not an APK build.
+GitHub Actions run `44461202705` successfully built and verified both `librnllama.so` and `libjimmy_pocketpal_jni.so` as ELF64/AArch64 shared libraries, including the MTMD image path. Artifact: `pocketpal-rnllama-arm64-cpu` (41,641,838 bytes). SHA-256: `librnllama.so` = `798e3e022174aeed0bdac768db30e253398e67fc7b1fec716c8dd06167efa6a7`; `libjimmy_pocketpal_jni.so` = `369382294e272ae45ae765cb01dcc15669d416636d173d691aa532d617d4c337`. This is a native-library CI build, not an APK build.
 
-The unit-test-only workflow run 44406966524 also completed successfully after the process-wide provider and coordinator lifecycle changes.
+The unit-test-only workflow run `44461541188` passed all 26 tests, including the local-only multimodal coordinator route. The earlier structured runner regression suite also passed in run `44459350163`.
 
 The Kotlin provider and UI cutover have not yet been validated on the physical Exynos device. The final APK build remains deferred until all additions and changes are complete.
