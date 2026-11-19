@@ -1907,13 +1907,13 @@ fun MainScreen() {
                                         githubPreviewText = buildString {
                                             append("Предпросмотр изменений: ${files.size} файлов, ")
                                             append(files.sumOf { it.content.toByteArray(Charsets.UTF_8).size } / 1024)
-                                            append(" КБ\\n")
-                                            files.forEach { append("• + ").append(it.path).append('\\n') }
+                                            append(" КБ\n")
+                                            files.forEach { append("• + ").append(it.path).append('\n') }
                                             if (deletions.isNotEmpty()) {
-                                                append("\\nКандидаты на удаление (не выбраны автоматически):\\n")
-                                                deletions.forEach { append("• − ").append(it).append('\\n') }
+                                                append("\nКандидаты на удаление (не выбраны автоматически):\n")
+                                                deletions.forEach { append("• − ").append(it).append('\n') }
                                             } else {
-                                                append("\\nУдалений нет. Файлы из базовой ветки не затрагиваются.")
+                                                append("\nУдалений нет. Файлы из базовой ветки не затрагиваются.")
                                             }
                                         }
                                         githubProjectStatus = if (workingName == null) {
