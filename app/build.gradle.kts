@@ -62,7 +62,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":llama"))
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
