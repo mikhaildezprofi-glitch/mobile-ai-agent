@@ -1923,6 +1923,8 @@ fun MainScreen() {
                                         }
                                     } catch (error: Exception) {
                                         githubPendingFiles = emptyList()
+                                        githubPendingDeletePaths = emptyList()
+                                        githubDeleteConfirmed = false
                                         githubPreviewText = ""
                                         githubProjectStatus = "Предпросмотр остановлен: ${error.message ?: error.javaClass.simpleName}"
                                     } finally {
