@@ -65,12 +65,16 @@ class AgentCoordinator(
         localReady = local.isAvailable,
         cloudReady = allowCloud && cloud?.isAvailable == true,
         fileReaderReady = true,
-        codeWorkspaceReady = true
+        codeWorkspaceReady = local.isAvailable
     ).all()
 
     fun classify(prompt: String): AgentTaskKind {
         val value = prompt.lowercase()
         return when {
+            listOf("открой проект", "открой репозиторий", "прочитай исходники",
+                "найди в проекте", "исправь файл", "создай файл", "измени файл",
+                "отредактируй файл", "добавь в проект", "работай с проектом").any(value::contains) ->
+                AgentTaskKind.CODE
             listOf("открой", "нажми", "включи", "выключи", "удали", "установи",
                 "запусти приложение", "отправь сообщение", "позвони").any(value::contains) ->
                 AgentTaskKind.DEVICE_ACTION
