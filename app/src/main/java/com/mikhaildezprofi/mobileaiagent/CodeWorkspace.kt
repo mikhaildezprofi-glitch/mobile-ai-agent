@@ -28,13 +28,17 @@ internal class CodeWorkspace(rootDirectory: File) {
         val start = resolve(relativeDirectory, allowEmpty = true)
         require(start.isDirectory) { "Указанный путь не является каталогом." }
         val result = mutableListOf<String>()
+        val visitedDirectories = mutableSetOf<String>()
 
         fun visit(directory: File, depth: Int) {
             if (depth > maxDepth || result.size >= maxFiles) return
+            if (!visitedDirectories.add(directory.canonicalPath)) return
             directory.listFiles()
                 ?.sortedBy { it.name.lowercase() }
                 ?.forEach { child ->
                     if (child.name in EXCLUDED_DIRECTORIES || child.name.startsWith(".jimmy-")) return@forEach
+                    // Never follow symbolic links: even an in-workspace link can create cycles.
+                    if (Files.isSymbolicLink(child.toPath())) return@forEach
                     val safe = child.canonicalFile
                     ensureInsideWorkspace(safe)
                     if (safe.isDirectory) {
@@ -53,6 +57,7 @@ internal class CodeWorkspace(rootDirectory: File) {
     fun readFile(relativePath: String, maxBytes: Int = MAX_FILE_BYTES): ReadResult {
         val file = resolve(relativePath)
         require(file.isFile && file.canRead()) { "Файл не найден или недоступен для чтения." }
+        require(maxBytes in 1..MAX_FILE_BYTES) { "Недопустимый лимит чтения." }
         require(file.length() <= maxBytes) { "Файл превышает лимит чтения $maxBytes байт." }
         val bytes = file.readBytes()
         require(bytes.none { it == 0.toByte() }) { "Бинарные файлы не поддерживаются." }
@@ -95,7 +100,9 @@ internal class CodeWorkspace(rootDirectory: File) {
             "Не удалось создать каталог файла."
         }
         if (file.exists()) {
+            require(!Files.isSymbolicLink(file.toPath())) { "Символические ссылки нельзя изменять через Code Agent." }
             require(file.isFile) { "Путь уже занят каталогом." }
+            require(file.length() <= MAX_FILE_BYTES) { "Существующий файл превышает лимит безопасного редактирования." }
             require(!expectedSha256.isNullOrBlank()) {
                 "Для изменения существующего файла сначала прочитайте его и передайте expected_sha256."
             }
@@ -130,9 +137,16 @@ internal class CodeWorkspace(rootDirectory: File) {
             "Разрешены только относительные пути внутри рабочей области."
         }
         require(allowEmpty || relativePath.isNotBlank()) { "Путь к файлу пуст." }
+        val segments = relativePath.replace('\\', '/').split('/')
+        var cursor = root
+        segments.filter { it.isNotEmpty() && it != "." && it != ".." }.forEach { segment ->
+            cursor = File(cursor, segment)
+            require(!Files.isSymbolicLink(cursor.toPath())) {
+                "Символические ссылки запрещены в рабочей области Code Agent."
+            }
+        }
         val target = if (relativePath.isBlank()) root else File(root, relativePath).canonicalFile
         ensureInsideWorkspace(target)
-        val segments = relativePath.replace('\\', '/').split('/')
         require(segments.none { it == ".." || it in EXCLUDED_DIRECTORIES || it.startsWith(".jimmy-") }) {
             "Путь обращается к запрещённому каталогу или служебному файлу."
         }
