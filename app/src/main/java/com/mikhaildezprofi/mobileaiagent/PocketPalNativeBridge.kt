@@ -67,6 +67,29 @@ internal class PocketPalNativeBridge : PocketPalGenerationEngine, AutoCloseable 
         }
     }
 
+    fun loadVisionProjector(projectorPath: String) {
+        require(projectorPath.isNotBlank()) { "Путь к vision-проектору пуст." }
+        synchronized(lifecycleLock) {
+            val currentHandle = synchronized(this) {
+                check(handle != 0L) { "Нативный контекст PocketPal закрыт." }
+                handle
+            }
+            check(nativeLoadVisionProjector(currentHandle, projectorPath)) {
+                "Не удалось загрузить vision-проектор через PocketPal."
+            }
+        }
+    }
+
+    fun releaseVisionProjector() {
+        synchronized(lifecycleLock) {
+            val currentHandle = synchronized(this) {
+                if (handle == 0L) return
+                handle
+            }
+            nativeReleaseVisionProjector(currentHandle)
+        }
+    }
+
     override fun generate(
         messages: JSONArray,
         tools: JSONArray,
@@ -115,6 +138,8 @@ internal class PocketPalNativeBridge : PocketPalGenerationEngine, AutoCloseable 
 
     private external fun nativeCreateContext(): Long
     private external fun nativeLoadModel(handle: Long, modelPath: String, contextSize: Int, threads: Int): Boolean
+    private external fun nativeLoadVisionProjector(handle: Long, projectorPath: String): Boolean
+    private external fun nativeReleaseVisionProjector(handle: Long)
     private external fun nativeGenerate(
         handle: Long,
         messagesJson: String,
