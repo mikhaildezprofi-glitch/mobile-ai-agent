@@ -23,6 +23,7 @@ internal class CodeAgentToolRegistry(private val workspace: CodeWorkspace) {
             JSONObject().put("type", "object").put("properties", JSONObject()
                 .put("path", stringProperty("Relative file path")))
                 .put("required", JSONArray().put("path"))
+                .put("additionalProperties", false)
         ))
         put(tool(
             "code_search",
@@ -32,6 +33,7 @@ internal class CodeAgentToolRegistry(private val workspace: CodeWorkspace) {
                 .put("directory", stringProperty("Optional relative directory"))
                 .put("max_results", integerProperty("Maximum matches, 1 to 100")))
                 .put("required", JSONArray().put("query"))
+                .put("additionalProperties", false)
         ))
         put(tool(
             "code_write_file",
@@ -41,6 +43,7 @@ internal class CodeAgentToolRegistry(private val workspace: CodeWorkspace) {
                 .put("content", stringProperty("Complete UTF-8 file content"))
                 .put("expected_sha256", stringProperty("SHA-256 returned by code_read_file; required when replacing an existing file")))
                 .put("required", JSONArray().put("path").put("content"))
+                .put("additionalProperties", false)
         ))
     }
 
