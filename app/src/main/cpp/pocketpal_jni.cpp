@@ -30,6 +30,69 @@ struct NativeContext {
     std::unique_ptr<rnllama::llama_rn_context> context;
 };
 
+std::vector<std::string> normalizeMultimodalMessages(json & messages) {
+    std::vector<std::string> mediaPaths;
+    if (!messages.is_array()) {
+        throw std::runtime_error("Chat messages must be a JSON array.");
+    }
+
+    for (auto & message : messages) {
+        if (!message.is_object()) continue;
+        auto content = message.find("content");
+        if (content == message.end() || !content->is_array()) continue;
+
+        json normalized = json::array();
+        for (const auto & part : *content) {
+            if (!part.is_object()) {
+                normalized.push_back(part);
+                continue;
+            }
+
+            const std::string type = part.value("type", std::string());
+            if (type == "image_url") {
+                const auto image = part.find("image_url");
+                const std::string mediaPath = image != part.end() && image->is_object()
+                    ? image->value("url", std::string())
+                    : std::string();
+                if (mediaPath.empty()) {
+                    throw std::runtime_error("Image attachment is missing image_url.url.");
+                }
+                std::string localPath = mediaPath;
+                if (localPath.compare(0, 7, "file://") == 0) localPath.erase(0, 7);
+                mediaPaths.push_back(std::move(localPath));
+                normalized.push_back(json::object({
+                    {"type", "text"},
+                    {"text", "<__media__>"}
+                }));
+            } else if (type == "input_audio") {
+                const auto audio = part.find("input_audio");
+                if (audio == part.end() || !audio->is_object()) {
+                    throw std::runtime_error("Audio attachment is missing input_audio.");
+                }
+                std::string mediaPath = audio->value("url", std::string());
+                if (!mediaPath.empty()) {
+                    if (mediaPath.compare(0, 7, "file://") == 0) mediaPath.erase(0, 7);
+                } else {
+                    mediaPath = audio->value("data", std::string());
+                }
+                if (mediaPath.empty()) {
+                    throw std::runtime_error("Audio attachment requires a local url or data URL.");
+                }
+                mediaPaths.push_back(std::move(mediaPath));
+                normalized.push_back(json::object({
+                    {"type", "text"},
+                    {"text", "<__media__>"}
+                }));
+            } else {
+                normalized.push_back(part);
+            }
+        }
+        message["content"] = std::move(normalized);
+    }
+
+    return mediaPaths;
+}
+
 std::string fromJavaString(JNIEnv * env, jstring value) {
     if (value == nullptr) return {};
     const jchar * chars = env->GetStringChars(value, nullptr);
@@ -282,9 +345,11 @@ Java_com_mikhaildezprofi_mobileaiagent_PocketPalNativeBridge_nativeGenerate(
         if (messages.empty()) {
             throw std::invalid_argument("Chat messages JSON is empty.");
         }
-        const json parsedMessages = json::parse(messages);
-        if (!parsedMessages.is_array()) {
-            throw std::invalid_argument("Chat messages must be a JSON array.");
+        json parsedMessages = json::parse(messages);
+        const std::vector<std::string> mediaPaths = normalizeMultimodalMessages(parsedMessages);
+        messages = parsedMessages.dump();
+        if (!mediaPaths.empty() && !context->isMultimodalEnabled()) {
+            throw std::runtime_error("Image/audio input requires a loaded PocketPal multimodal projector.");
         }
         if (!tools.empty()) {
             const json parsedTools = json::parse(tools);
@@ -333,7 +398,7 @@ Java_com_mikhaildezprofi_mobileaiagent_PocketPalNativeBridge_nativeGenerate(
         std::string lastContent;
         std::string lastReasoning;
         try {
-            completion->loadPrompt({});
+            completion->loadPrompt(mediaPaths);
             while (completion->has_next_token && !completion->is_interrupted) {
                 if (native->cancelled.load()) {
                     completion->is_interrupted = true;
@@ -390,6 +455,52 @@ Java_com_mikhaildezprofi_mobileaiagent_PocketPalNativeBridge_nativeGenerate(
         throwIllegalState(env, "Unknown error during PocketPal generation.");
         return nullptr;
     }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mikhaildezprofi_mobileaiagent_PocketPalNativeBridge_nativeLoadVisionProjector(
+    JNIEnv * env, jobject /*thiz*/, jlong handle, jstring projectorPath) {
+    NativeContext * native = getContext(handle);
+    if (native == nullptr) {
+        throwIllegalState(env, "PocketPal native context is not initialized.");
+        return JNI_FALSE;
+    }
+
+    std::lock_guard<std::mutex> lock(native->mutex);
+    if (!native->context || native->context->model == nullptr || native->context->ctx == nullptr) {
+        throwIllegalState(env, "Load a PocketPal model before its multimodal projector.");
+        return JNI_FALSE;
+    }
+
+    try {
+        const std::string path = fromJavaString(env, projectorPath);
+        if (path.empty()) throw std::runtime_error("Multimodal projector path is empty.");
+        native->context->releaseMultimodal();
+        if (!native->context->initMultimodal(path, false)) {
+            throw std::runtime_error("PocketPal could not initialize the multimodal projector.");
+        }
+        if (!native->context->isMultimodalSupportVision()) {
+            native->context->releaseMultimodal();
+            throw std::runtime_error("Loaded projector does not expose vision support.");
+        }
+        __android_log_print(ANDROID_LOG_INFO, TAG, "PocketPal vision projector loaded: %s", path.c_str());
+        return JNI_TRUE;
+    } catch (const std::exception & error) {
+        throwIllegalState(env, error.what());
+        return JNI_FALSE;
+    } catch (...) {
+        throwIllegalState(env, "Unknown error while loading PocketPal vision projector.");
+        return JNI_FALSE;
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mikhaildezprofi_mobileaiagent_PocketPalNativeBridge_nativeReleaseVisionProjector(
+    JNIEnv * env, jobject /*thiz*/, jlong handle) {
+    NativeContext * native = getContext(handle);
+    if (native == nullptr) return;
+    std::lock_guard<std::mutex> lock(native->mutex);
+    if (native->context) native->context->releaseMultimodal();
 }
 
 extern "C" JNIEXPORT void JNICALL
