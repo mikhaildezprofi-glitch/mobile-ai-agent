@@ -15,10 +15,11 @@ import java.io.File
  * Primary local text provider backed by PocketPal's llama.rn engine.
  * Model paths are read from the same preference written by the model picker.
  */
-internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, AutoCloseable {
+internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, AgentMultimodalModelProvider, AutoCloseable {
     private val appContext = context.applicationContext
     private val lock = Any()
     @Volatile private var loadedPath: String? = null
+    @Volatile private var loadedProjectorPath: String? = null
     @Volatile private var bridge: PocketPalNativeBridge? = null
 
     override val id: String = "PocketPal llama.rn"
@@ -39,24 +40,30 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Au
         }
     }
 
-    private fun ensureEngine(model: File): PocketPalNativeBridge {
+    private fun ensureEngine(model: File, projector: File? = null): PocketPalNativeBridge {
         val path = model.absolutePath
+        val projectorPath = projector?.absolutePath
         synchronized(lock) {
             val active = bridge
-            if (active != null && loadedPath == path) return active
+            if (active != null && loadedPath == path && loadedProjectorPath == projectorPath) return active
 
+            // Only one GGUF context is kept alive. Switching between Qwen and SmolVLM
+            // releases the previous model before loading the next one.
             active?.close()
             val next = PocketPalNativeBridge()
             try {
                 val cores = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
                 next.loadModel(path, contextSize = 4096, threads = cores)
+                if (projectorPath != null) next.loadVisionProjector(projectorPath)
                 bridge = next
                 loadedPath = path
+                loadedProjectorPath = projectorPath
                 return next
             } catch (error: Exception) {
                 next.close()
                 bridge = null
                 loadedPath = null
+                loadedProjectorPath = null
                 throw error
             }
         }
@@ -73,18 +80,84 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Au
         maxTokens: Int,
         temperature: Double,
         systemPrompt: String
-    ): Flow<String> = channelFlow {
+    ): Flow<String> {
         require(prompt.isNotBlank()) { "Запрос пуст." }
         val model = currentModelFile()
             ?: throw IllegalStateException("Файл локальной GGUF-модели не найден.")
+        val messages = JSONArray()
+        if (systemPrompt.isNotBlank()) {
+            messages.put(JSONObject().put("role", "system").put("content", systemPrompt))
+        }
+        messages.put(JSONObject().put("role", "user").put("content", prompt))
+        return stream(
+            messages = messages,
+            model = model,
+            projector = null,
+            maxTokens = maxTokens,
+            temperature = temperature
+        )
+    }
+
+    override fun generateWithImages(
+        prompt: String,
+        imagePaths: List<String>,
+        modelPath: String,
+        projectorPath: String,
+        maxTokens: Int,
+        temperature: Double,
+        systemPrompt: String
+    ): Flow<String> {
+        require(prompt.isNotBlank()) { "Запрос для анализа изображения пуст." }
+        require(imagePaths.isNotEmpty()) { "Список изображений пуст." }
+        val model = File(modelPath)
+        val projector = File(projectorPath)
+        require(model.isFile && model.canRead() && model.length() > 0L) {
+            "GGUF-файл Vision-модели не найден или недоступен."
+        }
+        require(projector.isFile && projector.canRead() && projector.length() > 0L) {
+            "Файл vision-проектора не найден или недоступен."
+        }
+        imagePaths.forEach { path ->
+            require(path.isNotBlank() && File(path).let { it.isFile && it.canRead() }) {
+                "Файл изображения недоступен: $path"
+            }
+        }
+
+        val messages = JSONArray()
+        if (systemPrompt.isNotBlank()) {
+            messages.put(JSONObject().put("role", "system").put("content", systemPrompt))
+        }
+        val content = JSONArray()
+            .put(JSONObject().put("type", "text").put("text", prompt))
+        imagePaths.forEach { path ->
+            content.put(
+                JSONObject()
+                    .put("type", "image_url")
+                    .put("image_url", JSONObject().put("url", path))
+            )
+        }
+        messages.put(JSONObject().put("role", "user").put("content", content))
+        return stream(
+            messages = messages,
+            model = model,
+            projector = projector,
+            maxTokens = maxTokens,
+            temperature = temperature
+        )
+    }
+
+    private fun stream(
+        messages: JSONArray,
+        model: File,
+        projector: File?,
+        maxTokens: Int,
+        temperature: Double
+    ): Flow<String> = channelFlow {
+        var generationBridge: PocketPalNativeBridge? = null
         val worker = launch(Dispatchers.IO) {
             try {
-                val active = ensureEngine(model)
-                val messages = JSONArray()
-                if (systemPrompt.isNotBlank()) {
-                    messages.put(JSONObject().put("role", "system").put("content", systemPrompt))
-                }
-                messages.put(JSONObject().put("role", "user").put("content", prompt))
+                val active = ensureEngine(model, projector)
+                generationBridge = active
                 var previousSnapshot = ""
                 val listener = object : PocketPalSnapshotListener {
                     override fun onTurnStarted() {
@@ -128,7 +201,7 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Au
             }
         }
         awaitClose {
-            bridge?.cancel()
+            generationBridge?.cancel()
             worker.cancel()
         }
     }
@@ -138,6 +211,7 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Au
             bridge?.close()
             bridge = null
             loadedPath = null
+            loadedProjectorPath = null
         }
     }
 
