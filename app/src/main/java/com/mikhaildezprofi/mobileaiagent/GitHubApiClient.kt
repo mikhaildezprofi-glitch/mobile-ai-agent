@@ -226,6 +226,9 @@ class GitHubApiClient(
 
     fun getRunJobLog(runId: Long, jobId: Long): String {
         require(runId > 0 && jobId > 0)
+        require(listRunJobs(runId).any { it.id == jobId }) {
+            "Указанная job не относится к выбранному workflow run."
+        }
         val connection = openConnection(
             "GET",
             "/repos/$owner/$repository/actions/jobs/$jobId/logs"
