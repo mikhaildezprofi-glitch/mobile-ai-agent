@@ -72,6 +72,16 @@ class AgentCoordinatorTest {
     }
 
     @Test
+    fun openingProjectIsClassifiedAsCodeWorkspaceTask() {
+        val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
+
+        val route = coordinator.route("Открой проект и покажи исходники", hybridMode = true)
+
+        assertEquals(AgentTaskKind.CODE, route.task)
+        assertEquals(AgentProviderKind.LOCAL, route.provider)
+    }
+
+    @Test
     fun hybridModeRoutesProjectFileEditsToLocalCodeTools() {
         val coordinator = AgentCoordinator(FakeProvider("local"), FakeCloudProvider())
 
