@@ -56,9 +56,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.arm.aichat.AiChat
-import com.arm.aichat.InferenceEngine
-import com.arm.aichat.VisionInferenceEngine
 import com.mikhaildezprofi.mobileaiagent.AgentCoordinator
 import com.mikhaildezprofi.mobileaiagent.AgentTaskStore
 import com.mikhaildezprofi.mobileaiagent.AgentTaskKind
@@ -308,7 +305,6 @@ fun MainScreen() {
     var diagnostics by remember { mutableStateOf(false) }
     var diagnosticDetails by remember { mutableStateOf("") }
     var performanceDetails by remember { mutableStateOf("Метрики появятся во время генерации.") }
-    var engine by remember { mutableStateOf<InferenceEngine?>(null) }
     var modelReady by remember { mutableStateOf(false) }
     var visionReady by remember { mutableStateOf(false) }
     var visionRevision by remember { mutableStateOf(0) }
@@ -523,56 +519,29 @@ fun MainScreen() {
 
     LaunchedEffect(appContext) {
         val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
-        val savedModelPath = preferences.getString("model_path", null)
-        val preferredModel = savedModelPath?.let { File(it) }
-        val fallbackModel = File(appContext.filesDir, "models/Qwen3-1.7B-Q4_K_M.gguf")
-        val savedModel = listOfNotNull(preferredModel, fallbackModel)
-            .firstOrNull { it.isFile && it.canRead() && it.length() > 0L }
+        val candidates = listOfNotNull(
+            preferences.getString("model_path", null)?.let { File(it) },
+            preferences.getString("text_model_path", null)?.let { File(it) },
+            preferences.getString("vision_model_path", null)?.let { File(it) },
+            File(appContext.filesDir, "models/Qwen3-1.7B-Q4_K_M.gguf")
+        )
+        val savedModel = candidates.firstOrNull {
+            it.isFile && it.canRead() && it.length() > 0L
+        }
         val isSavedVisionModel = savedModel?.name?.contains("SmolVLM", ignoreCase = true) == true
-
-        try {
-            val instance = withContext(Dispatchers.IO) {
-                AiChat.getInferenceEngine(appContext)
-            }
-            val initialState = withContext(Dispatchers.IO) {
-                instance.state.first {
-                    it !is InferenceEngine.State.Uninitialized &&
-                    it !is InferenceEngine.State.Initializing
-                }
-            }
-            engine = instance
-
-            // PocketPal owns both text and multimodal inference. Keep the legacy
-            // llama.cpp context unloaded so Qwen/SmolVLM are never duplicated in RAM.
-            withContext(Dispatchers.IO) {
-                if (instance.state.value is InferenceEngine.State.ModelReady ||
-                    instance.state.value is InferenceEngine.State.Error
-                ) instance.cleanUp()
-            }
-            modelReady = savedModel != null
-            visionReady = withContext(Dispatchers.IO) {
-                val selectedVision = preferences.getString("vision_model_path", null)?.let { File(it) }
-                val selectedProjector = preferences.getString("vision_mmproj_path", null)?.let { File(it) }
-                (selectedVision?.isFile == true && selectedVision.canRead() &&
-                    selectedProjector?.isFile == true && selectedProjector.canRead()) ||
-                    VisionModelAssets.areAssetsPresent(appContext)
-            }
-            status = when {
-                isSavedVisionModel && modelReady ->
-                    "SmolVLM выбрана. PocketPal загрузит её вместе с проектором при анализе изображений."
-                modelReady ->
-                    "PocketPal готов. Текстовая модель будет загружена при первом запросе."
-                else ->
-                    "PocketPal готов. Выберите GGUF-модель для локальной работы."
-            }
-        } catch (error: LinkageError) {
-            engine = null
-            modelReady = savedModel != null
-            status = "PocketPal доступен независимо от старого движка: ${error.message ?: error.javaClass.simpleName}"
-        } catch (error: Exception) {
-            engine = null
-            modelReady = savedModel != null
-            status = "PocketPal готов; старый движок не инициализирован: ${error.message ?: error.javaClass.simpleName}"
+        val selectedVision = preferences.getString("vision_model_path", null)?.let { File(it) }
+        val selectedProjector = preferences.getString("vision_mmproj_path", null)?.let { File(it) }
+        modelReady = savedModel != null
+        visionReady = (selectedVision?.isFile == true && selectedVision.canRead() &&
+            selectedProjector?.isFile == true && selectedProjector.canRead()) ||
+            VisionModelAssets.areAssetsPresent(appContext)
+        status = when {
+            isSavedVisionModel && modelReady ->
+                "SmolVLM выбрана. PocketPal загрузит её вместе с проектором при анализе изображений."
+            modelReady ->
+                "PocketPal готов. Локальная модель загрузится при первом запросе."
+            else ->
+                "PocketPal готов. Выберите GGUF-модель для локальной работы."
         }
     }
 
@@ -613,7 +582,6 @@ fun MainScreen() {
                     destination
                 }
 
-                val activeEngine = engine
                 val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
                 if (isProjector) {
                     val selectedVision = preferences.getString("vision_model_path", null)?.let { File(it) }
