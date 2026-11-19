@@ -10,6 +10,7 @@ The local PocketPal provider supplies four structured tools to the text model. I
 - `code_read_file`: read a UTF-8 source/configuration file and return its SHA-256.
 - `code_search`: search text in workspace files.
 - `code_write_file`: create a file or replace an existing file only when the caller supplies the current SHA-256 from a previous read.
+- A bounded ZIP archive utility can import/export a named project directory. It rejects traversal, duplicate paths and oversized archives, and skips Git/build/dependency directories. The Android document-picker UI is not connected yet.
 
 Workspace root: `filesDir/code-workspace` (private app storage). It is deliberately separate from arbitrary shared storage and from the app's own installed source files.
 
@@ -29,14 +30,14 @@ Workspace root: `filesDir/code-workspace` (private app storage). It is deliberat
 
 This is the first safe workspace layer, not a complete autonomous IDE:
 
-1. Project import/export through Android's Storage Access Framework.
+1. Android Storage Access Framework picker UI to invoke the safe ZIP import/export utility and select the active project.
 2. Patch preview and explicit user approval before applying a multi-file change to an imported project.
 3. A remote GitHub Actions test/build executor with scoped GitHub authorization. A PAT must never be embedded in the APK.
 4. Git status/diff/branch/commit/PR operations through an authenticated GitHub integration.
 5. Compiler/test output ingestion and bounded repair iterations.
 6. UI for selecting the active workspace/project and reviewing changes.
 
-The app does not execute arbitrary shell commands or compile untrusted source code locally. Build and test execution is intended to be delegated to isolated GitHub Actions jobs after the authenticated integration and approval flow are implemented. The current private workspace is initially empty: until the SAF project import/export flow is added, the agent can create and edit files there but cannot inspect an existing repository or the installed app's own source tree.
+The app does not execute arbitrary shell commands or compile untrusted source code locally. Build and test execution is intended to be delegated to isolated GitHub Actions jobs after the authenticated integration and approval flow are implemented. The current private workspace is initially empty: until the SAF picker UI is added, the user cannot yet import an existing repository through the app. The agent can create and edit files in its private workspace but cannot inspect the installed app's own source tree.
 
 ## Validation
 
