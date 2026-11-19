@@ -132,17 +132,27 @@ class PocketPalStructuredAgentRunnerTest {
     }
 
     @Test
-    fun visionModeDoesNotExposeTextToolSchemas() {
-        val engine = FakeEngine(ArrayDeque(listOf(result("Описание изображения"))))
+    fun visionModeDoesNotExposeTextOrCodeToolSchemas() {
+        val root = Files.createTempDirectory("jimmy-vision-tools").toFile()
+        try {
+            val codeTools = CodeAgentToolRegistry(CodeWorkspace(root))
+            val engine = FakeEngine(ArrayDeque(listOf(result("Описание изображения"))))
 
-        val final = PocketPalStructuredAgentRunner(engine, enableTools = false).generate(
-            JSONArray().put(JSONObject().put("role", "user").put("content", "Что на фото?")),
-            maxTokens = 256,
-            temperature = 0.2f
-        )
+            val final = PocketPalStructuredAgentRunner(
+                engine,
+                enableTools = false,
+                codeTools = codeTools
+            ).generate(
+                JSONArray().put(JSONObject().put("role", "user").put("content", "Что на фото?")),
+                maxTokens = 256,
+                temperature = 0.2f
+            )
 
-        assertEquals("Описание изображения", final.content)
-        assertEquals(0, engine.requests.single().second.length())
+            assertEquals("Описание изображения", final.content)
+            assertEquals(0, engine.requests.single().second.length())
+        } finally {
+            root.deleteRecursively()
+        }
     }
 
     @Test
