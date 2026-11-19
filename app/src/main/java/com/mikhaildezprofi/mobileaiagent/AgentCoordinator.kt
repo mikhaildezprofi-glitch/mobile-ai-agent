@@ -64,7 +64,8 @@ class AgentCoordinator(
     fun capabilities(): List<AgentCapability> = AgentToolRegistry.forRuntime(
         localReady = local.isAvailable,
         cloudReady = allowCloud && cloud?.isAvailable == true,
-        fileReaderReady = true
+        fileReaderReady = true,
+        codeWorkspaceReady = true
     ).all()
 
     fun classify(prompt: String): AgentTaskKind {
