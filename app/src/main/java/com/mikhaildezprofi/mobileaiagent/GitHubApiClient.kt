@@ -395,8 +395,17 @@ class GitHubApiClient(
                 "Путь выходит за пределы рабочей области."
             }
             val lower = path.lowercase()
-            val name = lower.substringAfterLast('/')
-            val forbidden = name == ".env" ||
+            val segments = lower.split('/')
+            val name = segments.last()
+            val sensitiveDirectory = segments.dropLast(1).any { segment ->
+                segment in setOf("secrets", "credentials", ".ssh", ".aws") ||
+                    segment.contains("secret") || segment.contains("credential")
+            }
+            val forbidden = sensitiveDirectory ||
+                name == ".env" || name.startsWith(".env.") ||
+                name in setOf(".npmrc", ".pypirc", ".netrc", "id_rsa", "id_ed25519",
+                    "google-services.json", "service-account.json") ||
+                name.startsWith("firebase-adminsdk") ||
                 name.endsWith(".keystore") || name.endsWith(".jks") ||
                 name.endsWith(".p12") || name.endsWith(".pfx") ||
                 name.endsWith(".pem") || name.endsWith(".key") ||
