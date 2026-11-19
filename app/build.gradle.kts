@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.mikhaildezprofi.mobileaiagent"
     compileSdk = 36
+    ndkVersion = "29.0.13113456"
 
     defaultConfig {
         applicationId = "com.mikhaildezprofi.mobileaiagent"
