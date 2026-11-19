@@ -9,6 +9,7 @@ The local PocketPal provider supplies four structured tools to the text model. I
 - `code_list_files`: list files in the private Code Agent workspace.
 - `code_read_file`: read a UTF-8 source/configuration file and return its SHA-256.
 - `code_search`: search text in workspace files.
+- `code_replace_text`: replace one exact text fragment in a file only when it occurs exactly once and the caller supplies the current SHA-256.
 - `code_write_file`: create a file or replace an existing file only when the caller supplies the current SHA-256 from a previous read.
 - A bounded ZIP archive utility imports/exports named project directories through Android's Storage Access Framework document picker.
 - The user can select the active project. The local model's Code Agent tools are scoped to that project's directory, not the full workspace.
@@ -23,7 +24,7 @@ Workspace root: `filesDir/code-workspace` (private app storage). It is deliberat
 - UTF-8 text files are limited to 512 KiB per read/write.
 - Existing-file edits require an optimistic SHA-256 match, preventing stale model output from overwriting a newer workspace version.
 - Writes are atomic within the same directory.
-- The tool allow-list contains no shell, process execution, arbitrary code execution, delete, network, or device-control operation.
+- The tool allow-list contains no shell, process execution, arbitrary code execution, delete, network, or device-control operation. Precise edits fail closed when the source fragment is missing, duplicated, or stale.
 - The existing structured runner's hard limit of five tool calls per request also applies to Code Agent tools.
 - Vision inference still receives no text tool schemas.
 
