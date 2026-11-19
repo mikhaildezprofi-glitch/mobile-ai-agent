@@ -1,25 +1,26 @@
 package com.mikhaildezprofi.mobileaiagent
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GitHubTokenRulesTest {
-    @Test fun trimsOnlyOuterWhitespace() {
-        val token = "ghp_" + "a".repeat(36)
-        assertEquals(token, GitHubTokenRules.normalize("  $token\n"))
+    @Test fun acceptsClassicAndFineGrainedTokenFormats() {
+        assertTrue(GitHubTokenStore.isValidTokenFormat("ghp_" + "a".repeat(36)))
+        assertTrue(GitHubTokenStore.isValidTokenFormat("github_pat_" + "a".repeat(60)))
     }
-    @Test fun rejectsTooShortTokens() {
-        assertThrows(IllegalArgumentException::class.java) { GitHubTokenRules.normalize("short-token") }
+
+    @Test fun rejectsTokensOutsideSupportedLength() {
+        assertFalse(GitHubTokenStore.isValidTokenFormat("short"))
+        assertFalse(GitHubTokenStore.isValidTokenFormat("a".repeat(513)))
     }
-    @Test fun rejectsInternalWhitespace() {
-        assertThrows(IllegalArgumentException::class.java) {
-            GitHubTokenRules.normalize("ghp_" + "a".repeat(18) + " " + "b".repeat(18))
-        }
+
+    @Test fun rejectsWhitespaceAndControlCharacters() {
+        assertFalse(GitHubTokenStore.isValidTokenFormat("ghp_" + "a".repeat(20) + " b"))
+        assertFalse(GitHubTokenStore.isValidTokenFormat("ghp_" + "a".repeat(20) + "\n"))
     }
-    @Test fun rejectsControlCharacters() {
-        assertThrows(IllegalArgumentException::class.java) {
-            GitHubTokenRules.normalize("ghp_" + "a".repeat(18) + "\u0000" + "b".repeat(18))
-        }
+
+    @Test fun rejectsUnsupportedCharacters() {
+        assertFalse(GitHubTokenStore.isValidTokenFormat("ghp_" + "a".repeat(20) + "-"))
     }
 }
