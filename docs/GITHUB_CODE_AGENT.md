@@ -18,7 +18,7 @@
 - The HTTP connection factory and token-reader interface are injectable for deterministic API unit tests without live GitHub requests.
 
 ### Code Agent project UI
-- Project dialog now supports creating an isolated GitHub working branch.
+- Project dialog supports creating an isolated GitHub working branch.
 - A local preview reads the selected private workspace project and lists every file before upload. It also shows removal candidates from a per-branch manifest of files previously synchronized by Jimmy.
 - Preview rejects unsafe paths, unreadable/binary files, more than 100 files, and total content above 5 MiB.
 - Upload requires a separate explicit confirmation action. Deletions are opt-in (unchecked by default), displayed as an exact path list, and require a separate checkbox confirmation.
@@ -26,13 +26,16 @@
 - The Git tree commit API accepts explicit deletion paths only after path validation, duplicate/overlap checks, and the same optimistic branch-SHA check as file updates.
 - Successful upload creates one commit in the selected `code-agent/*` branch and dispatches the test-only workflow.
 - UI can refresh workflow status and retrieve job summaries/failure logs.
-- The remote operation never writes to `main`.
+- Remote operations never write to `main`.
 - The active working branch, base SHA, and last workflow run ID are stored in app-private preferences. After restart, the user can regenerate the local file preview before committing. Pending file contents are deliberately not persisted.
 
-### CI workflow
+### CI workflow and verified tests
 - The dedicated unit-test workflow runs `:app:testDebugUnitTest` only, with `contents: read`.
 - It does not build an APK, upload a release, or receive the user's PAT.
 - CI execution of project Gradle scripts has no repository write token or application secrets.
+- Run #155 completed successfully on 2026-11-19 for commit `d9a424a02ecaa4b9bab066c017c8c5366d626b01`. All workflow steps, including `Run unit tests only`, completed successfully.
+- The API-level unit tests cover mocked HTTP responses, authorization failures, optimistic concurrency conflicts, branch/path validation, explicit deletion tree entries, and bounded ZIP log parsing.
+- The test HTTP connection mock explicitly supports `PATCH`, matching the GitHub reference-update request used after a commit.
 
 ## Fine-grained token permissions
 
@@ -51,13 +54,11 @@ GitHub grants Metadata read access automatically. Do not grant Administration, S
 - Intermediate validation uses the test-only workflow, never the APK build workflow.
 - The GitHub client does not execute arbitrary shell commands or project-provided scripts.
 
-## Remaining work in this stage
+## Remaining verification
 
-1. Run and verify the unit-test workflow on the integration branch after the latest UI/API changes; fix any failures.
-2. Verify the new API-level tests in CI, including mocked HTTP responses, authorization failures, optimistic concurrency conflicts, branch/path validation, and ZIP log parsing.
-3. Complete a device-side end-to-end run with a user-configured fine-grained token and a disposable working branch. This confirms the encrypted token, branch creation, preview, commit, test dispatch, and opt-in deletion flow together.
-4. Perform an end-to-end run with a user-configured fine-grained token and a disposable test branch.
-5. Update this document with the verified end-to-end result.
+1. Device-side end-to-end verification is **not yet performed**. It requires the user to configure a fine-grained token in the app and run the flow against a disposable `code-agent/*` branch.
+2. Per the current project workflow, no phone, Termux, or Desktop Commander testing is being performed in this development phase. The device-side check remains deferred until explicitly resumed.
+3. After that check, update this document with the observed result. Do not claim end-to-end verification based on unit tests alone.
 
 ## Build policy
 
