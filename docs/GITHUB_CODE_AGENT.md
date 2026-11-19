@@ -14,13 +14,16 @@
 - Git reference validation rejects traversal, malformed segments, hidden path segments, and `.lock` suffixes.
 - File-path validation blocks traversal, `.git`, generated directories, local properties, model weights, APKs, environment files, and common signing-key/credential files.
 - The client can dispatch only `.github/workflows/agent-unit-tests.yml`, list runs/jobs, compare a working branch with its base, and retrieve job logs.
-- Job-log downloads use GitHub's short-lived HTTPS redirect without forwarding the PAT to the redirect host. ZIP entries and total log size are bounded.
+- Job-log downloads use GitHub's short-lived HTTPS redirect without forwarding the PAT to the redirect host. ZIP entry count, per-entry size, total archive size, and rendered log text are bounded.
+- The HTTP connection factory and token-reader interface are injectable for deterministic API unit tests without live GitHub requests.
 
 ### Code Agent project UI
 - Project dialog now supports creating an isolated GitHub working branch.
-- A local preview reads the selected private workspace project and lists every file before upload.
+- A local preview reads the selected private workspace project and lists every file before upload. It also shows removal candidates from a per-branch manifest of files previously synchronized by Jimmy.
 - Preview rejects unsafe paths, unreadable/binary files, more than 100 files, and total content above 5 MiB.
-- Upload requires a separate explicit confirmation action.
+- Upload requires a separate explicit confirmation action. Deletions are opt-in (unchecked by default), displayed as an exact path list, and require a separate checkbox confirmation.
+- The deletion manifest is initialized only after the first successful upload to that working branch. Files inherited from the base branch are never considered managed and cannot be deleted by this feature. Unconfirmed removals remain in the manifest and reappear in the next preview.
+- The Git tree commit API accepts explicit deletion paths only after path validation, duplicate/overlap checks, and the same optimistic branch-SHA check as file updates.
 - Successful upload creates one commit in the selected `code-agent/*` branch and dispatches the test-only workflow.
 - UI can refresh workflow status and retrieve job summaries/failure logs.
 - The remote operation never writes to `main`.
@@ -51,8 +54,8 @@ GitHub grants Metadata read access automatically. Do not grant Administration, S
 ## Remaining work in this stage
 
 1. Run and verify the unit-test workflow on the integration branch after the latest UI/API changes; fix any failures.
-2. Add API-level tests for mocked HTTP requests, optimistic concurrency conflicts, and ZIP log extraction.
-3. Add remote deletion preview/confirmation, so a full project sync can mirror removals safely.
+2. Verify the new API-level tests in CI, including mocked HTTP responses, authorization failures, optimistic concurrency conflicts, branch/path validation, and ZIP log parsing.
+3. Complete a device-side end-to-end run with a user-configured fine-grained token and a disposable working branch. This confirms the encrypted token, branch creation, preview, commit, test dispatch, and opt-in deletion flow together.
 4. Perform an end-to-end run with a user-configured fine-grained token and a disposable test branch.
 5. Update this document with the verified end-to-end result.
 
