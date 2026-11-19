@@ -106,7 +106,7 @@ class PocketPalStructuredAgentRunnerTest {
         assertEquals(2, engine.requests.count { it.second.length() > 0 })
         assertTrue(engine.requests[2].second.length() == 0)
         assertTrue(engine.requests[3].second.length() == 0)
-        val rejectedToolResult = engine.requests[3].first.getJSONObject(4).getString("content")
+        val rejectedToolResult = engine.requests[3].first.getJSONObject(6).getString("content")
         assertTrue(rejectedToolResult.contains("лимит"))
     }
 }
