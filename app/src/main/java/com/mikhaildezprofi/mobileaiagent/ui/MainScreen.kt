@@ -72,6 +72,8 @@ import com.mikhaildezprofi.mobileaiagent.SafeDocumentReader
 import com.mikhaildezprofi.mobileaiagent.GeminiApiKeyStore
 import com.mikhaildezprofi.mobileaiagent.GitHubTokenStore
 import com.mikhaildezprofi.mobileaiagent.GitHubApiClient
+import com.mikhaildezprofi.mobileaiagent.GitHubWorkingBranch
+import com.mikhaildezprofi.mobileaiagent.GitHubWorkspaceFile
 import com.mikhaildezprofi.mobileaiagent.GeminiCloudProvider
 import com.mikhaildezprofi.mobileaiagent.InstalledGeminiBridge
 import com.mikhaildezprofi.mobileaiagent.AgentRuntimeConfig
@@ -333,6 +335,12 @@ fun MainScreen() {
             .getString("active_code_project", "project") ?: "project")
     }
     var codeProjectStatus by remember { mutableStateOf("Импортируйте ZIP-архив проекта в приватную рабочую область Джимми.") }
+    var githubProjectBusy by remember { mutableStateOf(false) }
+    var githubWorkingBranch by remember { mutableStateOf<GitHubWorkingBranch?>(null) }
+    var githubPendingFiles by remember { mutableStateOf<List<GitHubWorkspaceFile>>(emptyList()) }
+    var githubPreviewText by remember { mutableStateOf("") }
+    var githubProjectStatus by remember { mutableStateOf("") }
+    var githubLastRunId by remember { mutableStateOf<Long?>(null) }
     var selectedTaskPlan by remember { mutableStateOf<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan?>(null) }
     var planPendingDeletion by remember { mutableStateOf<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan?>(null) }
     var agentTaskHistory by remember { mutableStateOf<List<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan>>(emptyList()) }
@@ -1775,6 +1783,186 @@ fun MainScreen() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(codeProjectStatus, style = MaterialTheme.typography.bodySmall)
+                    HorizontalDivider()
+                    Text("GitHub: отправка проекта и тестирование", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Создаётся отдельная ветка code-agent/*. Перед отправкой показывается список файлов. Удаление файлов на GitHub автоматически не выполняется.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    githubWorkingBranch?.let { working ->
+                        Text("Рабочая ветка: ${working.name}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (githubPreviewText.isNotBlank()) {
+                        SelectionContainer {
+                            Text(githubPreviewText, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    if (githubProjectStatus.isNotBlank()) {
+                        Text(githubProjectStatus, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(
+                            enabled = githubTokenConfigured && !githubProjectBusy && codeProjectName.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")),
+                            onClick = {
+                                githubProjectBusy = true
+                                githubProjectStatus = "Создание изолированной ветки GitHub…"
+                                scope.launch {
+                                    try {
+                                        val working = withContext(Dispatchers.IO) {
+                                            GitHubApiClient(githubTokenStore).createWorkingBranch()
+                                        }
+                                        githubWorkingBranch = working
+                                        githubPendingFiles = emptyList()
+                                        githubPreviewText = ""
+                                        githubLastRunId = null
+                                        githubProjectStatus = "Создана ветка ${working.name} от ${working.baseBranch}."
+                                    } catch (error: Exception) {
+                                        githubProjectStatus = "Не удалось создать ветку: ${error.message ?: error.javaClass.simpleName}"
+                                    } finally {
+                                        githubProjectBusy = false
+                                    }
+                                }
+                            }
+                        ) { Text("Создать ветку") }
+                        TextButton(
+                            enabled = !githubProjectBusy && codeProjectName.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")),
+                            onClick = {
+                                githubProjectBusy = true
+                                githubProjectStatus = "Чтение проекта и проверка файлов…"
+                                scope.launch {
+                                    try {
+                                        val files = withContext(Dispatchers.IO) {
+                                            val root = File(appContext.filesDir, "code-workspace").canonicalFile
+                                            val project = File(root, codeProjectName.trim()).canonicalFile
+                                            require(project.parentFile == root && project.isDirectory) {
+                                                "Сначала выберите существующий проект."
+                                            }
+                                            val workspace = CodeWorkspace(project)
+                                            val paths = workspace.listFiles(maxDepth = 8, maxFiles = 500)
+                                            require(paths.isNotEmpty()) { "В проекте нет файлов." }
+                                            require(paths.size <= 100) {
+                                                "В проекте ${paths.size} файлов. GitHub отправка ограничена 100 файлами за один коммит."
+                                            }
+                                            paths.map { relative ->
+                                                GitHubApiClient.normalizeWorkspacePath(relative)
+                                                val read = workspace.readFile(relative)
+                                                GitHubWorkspaceFile(relative, read.content)
+                                            }
+                                        }
+                                        githubPendingFiles = files
+                                        githubPreviewText = buildString {
+                                            append("Предпросмотр: ${files.size} файлов, ")
+                                            append(files.sumOf { it.content.toByteArray(Charsets.UTF_8).size } / 1024)
+                                            append(" КБ\n")
+                                            files.forEach { append("• ").append(it.path).append('\n') }
+                                        }
+                                        githubProjectStatus = "Предпросмотр готов. Файлы ещё не отправлены."
+                                    } catch (error: Exception) {
+                                        githubPendingFiles = emptyList()
+                                        githubPreviewText = ""
+                                        githubProjectStatus = "Предпросмотр остановлен: ${error.message ?: error.javaClass.simpleName}"
+                                    } finally {
+                                        githubProjectBusy = false
+                                    }
+                                }
+                            }
+                        ) { Text("Предпросмотр") }
+                    }
+                    TextButton(
+                        enabled = githubTokenConfigured && githubWorkingBranch != null &&
+                            githubPendingFiles.isNotEmpty() && !githubProjectBusy,
+                        onClick = {
+                            val working = githubWorkingBranch ?: return@TextButton
+                            val files = githubPendingFiles
+                            githubProjectBusy = true
+                            githubProjectStatus = "Отправка подтверждённого списка файлов в ${working.name}…"
+                            scope.launch {
+                                try {
+                                    val committed = withContext(Dispatchers.IO) {
+                                        GitHubApiClient(githubTokenStore).commitWorkspaceChanges(
+                                            branch = working.name,
+                                            expectedHeadSha = working.baseSha,
+                                            files = files,
+                                            message = "Code Agent: update ${codeProjectName.trim()}"
+                                        )
+                                    }
+                                    githubWorkingBranch = working.copy(baseSha = committed.commitSha)
+                                    githubPendingFiles = emptyList()
+                                    githubProjectStatus = "Отправлено: ${committed.changedFiles} файлов. Commit ${committed.commitSha.take(12)}. Запускаю unit-тесты…"
+                                    withContext(Dispatchers.IO) {
+                                        GitHubApiClient(githubTokenStore).dispatchUnitTests(working.name)
+                                    }
+                                    githubProjectStatus = "Коммит создан. Unit-тесты отправлены в GitHub Actions для ${working.name}."
+                                    delay(2500)
+                                    val run = withContext(Dispatchers.IO) {
+                                        GitHubApiClient(githubTokenStore).listUnitTestRuns(working.name, 5)
+                                            .firstOrNull { it.headSha == committed.commitSha }
+                                    }
+                                    if (run != null) {
+                                        githubLastRunId = run.id
+                                        githubProjectStatus = "Unit-тесты: ${run.status}${run.conclusion?.let { " / $it" } ?: ""}. Run #${run.id}."
+                                    } else {
+                                        githubProjectStatus = "Запуск принят GitHub. Результат пока не появился; нажмите «Обновить статус тестов» позже."
+                                    }
+                                } catch (error: Exception) {
+                                    githubProjectStatus = "GitHub операция завершилась ошибкой: ${error.message ?: error.javaClass.simpleName}"
+                                } finally {
+                                    githubProjectBusy = false
+                                }
+                            }
+                        }
+                    ) { Text("Подтвердить отправку и запустить тесты") }
+                    TextButton(
+                        enabled = githubTokenConfigured && githubWorkingBranch != null && !githubProjectBusy,
+                        onClick = {
+                            val working = githubWorkingBranch ?: return@TextButton
+                            githubProjectBusy = true
+                            scope.launch {
+                                try {
+                                    val run = withContext(Dispatchers.IO) {
+                                        GitHubApiClient(githubTokenStore).listUnitTestRuns(working.name, 5).firstOrNull()
+                                    }
+                                    if (run == null) {
+                                        githubProjectStatus = "GitHub пока не вернул запуск для этой ветки."
+                                    } else {
+                                        githubLastRunId = run.id
+                                        githubProjectStatus = "Run #${run.id}: ${run.status}${run.conclusion?.let { " / $it" } ?: ""}. ${run.htmlUrl}"
+                                    }
+                                } catch (error: Exception) {
+                                    githubProjectStatus = "Не удалось получить статус: ${error.message ?: error.javaClass.simpleName}"
+                                } finally {
+                                    githubProjectBusy = false
+                                }
+                            }
+                        }
+                    ) { Text("Обновить статус тестов") }
+                    githubLastRunId?.let { runId ->
+                        TextButton(
+                            enabled = githubTokenConfigured && !githubProjectBusy,
+                            onClick = {
+                                githubProjectBusy = true
+                                scope.launch {
+                                    try {
+                                        val report = withContext(Dispatchers.IO) {
+                                            val api = GitHubApiClient(githubTokenStore)
+                                            val jobs = api.listRunJobs(runId)
+                                            jobs.joinToString("\n\n") { job ->
+                                                "• ${job.name}: ${job.status} / ${job.conclusion ?: "выполняется"}\n" +
+                                                    if (job.conclusion == "failure") api.getRunJobLog(runId, job.id).take(12000)
+                                                    else ""
+                                            }
+                                        }
+                                        githubProjectStatus = report.ifBlank { "GitHub Actions пока не вернул сведения о шагах." }
+                                    } catch (error: Exception) {
+                                        githubProjectStatus = "Не удалось прочитать журнал: ${error.message ?: error.javaClass.simpleName}"
+                                    } finally {
+                                        githubProjectBusy = false
+                                    }
+                                }
+                            }
+                        ) { Text("Показать шаги и ошибки тестов") }
+                    }
                     TextButton(
                         enabled = !busy && codeProjectName.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")),
                         onClick = {
