@@ -155,7 +155,7 @@ class AgentCoordinator(
         require(imagePaths.isNotEmpty()) { "Для анализа не переданы изображения." }
         val provider = local as? AgentMultimodalModelProvider
             ?: error("Локальный провайдер не поддерживает мультимодальный ввод.")
-        Log.i(TAG, "task=IMAGE_ANALYSIS, provider=LOCAL, engine=PocketPal MTMD, images=${imagePaths.size}")
+        runCatching { Log.i(TAG, "task=IMAGE_ANALYSIS, provider=LOCAL, engine=PocketPal MTMD, images=${imagePaths.size}") }
         emitAll(
             provider.generateWithImages(
                 prompt = prompt,
