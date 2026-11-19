@@ -55,7 +55,7 @@ class GitHubApiException(
 /**
  * Restricted GitHub API client for one configured repository.
  *
- * All writes are confined to code-agent/* branches. The client never accepts an arbitrary host,
+ * All writes are confined to dedicated Code Agent working branches. The client never accepts an arbitrary host,
  * repository, ref namespace, or workflow path from model-generated tool arguments.
  * Call from Dispatchers.IO; methods are synchronous by design.
  */
