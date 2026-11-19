@@ -94,7 +94,8 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Ag
             model = model,
             projector = null,
             maxTokens = maxTokens,
-            temperature = temperature
+            temperature = temperature,
+            enableTools = true
         )
     }
 
@@ -142,7 +143,8 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Ag
             model = model,
             projector = projector,
             maxTokens = maxTokens,
-            temperature = temperature
+            temperature = temperature,
+            enableTools = false
         )
     }
 
@@ -151,7 +153,8 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Ag
         model: File,
         projector: File?,
         maxTokens: Int,
-        temperature: Double
+        temperature: Double,
+        enableTools: Boolean
     ): Flow<String> = channelFlow {
         var generationBridge: PocketPalNativeBridge? = null
         val worker = launch(Dispatchers.IO) {
@@ -176,7 +179,7 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Ag
                         if (delta.isNotEmpty()) trySend(delta)
                     }
                 }
-                val result = PocketPalStructuredAgentRunner(active).generate(
+                val result = PocketPalStructuredAgentRunner(active, enableTools = enableTools).generate(
                     messages = messages,
                     maxTokens = maxTokens.coerceIn(64, 8192),
                     temperature = temperature.toFloat().coerceIn(0f, 2f),
