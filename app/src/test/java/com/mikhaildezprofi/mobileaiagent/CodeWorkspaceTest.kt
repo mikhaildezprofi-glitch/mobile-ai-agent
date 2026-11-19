@@ -177,7 +177,7 @@ class CodeWorkspaceTest {
         }
 
         assertEquals(
-            listOf("code_list_files", "code_read_file", "code_search", "code_write_file"),
+            listOf("code_list_files", "code_read_file", "code_search", "code_replace_text", "code_write_file"),
             names
         )
         assertFalse(names.any { it.contains("shell") || it.contains("exec") || it.contains("delete") })
