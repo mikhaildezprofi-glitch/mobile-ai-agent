@@ -101,7 +101,7 @@ class GitHubApiClientTest {
         val bytes = zipOf("../outside.txt" to "log line", "job/step.txt" to "second line")
         val client = GitHubApiClient(Token()) { url -> Response(url, 200, "{}") }
 
-        val extracted = client.extractJobLogArchiveForTest(bytes)
+        val extracted = client.extractJobLogArchive(bytes)
 
         assertTrue(extracted.contains("../outside.txt"))
         assertTrue(extracted.contains("log line"))
