@@ -412,7 +412,7 @@ class AgentCoordinator(
                 emit(AgentTaskEvent.PlanCompleted(plan.id, results.toMap()))
             }
         } catch (cancelled: CancellationException) {
-            activeStepId?.let { taskStore?.setStepStatus(plan.id, it, AgentStepStatus.PENDING) }
+            // Keep the RUNNING step and its retry checkpoint intact for resumePlan().
             taskStore?.setPlanStatus(plan.id, AgentPlanStatus.PAUSED)
             throw cancelled
         } catch (error: Exception) {
