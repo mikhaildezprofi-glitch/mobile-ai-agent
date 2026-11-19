@@ -87,11 +87,6 @@ jobs:
             echo "GitLab main is synced, but APK build is deferred: gradle/libs.versions.toml is not present yet."
             exit 0
           fi
-          if ! git cat-file -e "${SOURCE_SHA}:scripts/patch-llama-diagnostics.py" 2>/dev/null; then
-            echo "build_ready=false" >> "$GITHUB_OUTPUT"
-            echo "GitLab source is missing the required llama.cpp patch script."
-            exit 0
-          fi
           echo "build_ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Detect Android build-affecting changes since last release
@@ -116,7 +111,7 @@ jobs:
           while IFS= read -r path; do
             [[ -z "$path" ]] && continue
             case "$path" in
-              app/*|llama/*|gradle/*|third_party/*|build.gradle.kts|settings.gradle.kts|gradle.properties|gradlew|gradlew.bat|scripts/patch-llama-diagnostics.py)
+              app/*|gradle/*|third_party/*|build.gradle.kts|settings.gradle.kts|gradle.properties|gradlew|gradlew.bat)
                 BUILD_REQUIRED=true
                 ;;
             esac
