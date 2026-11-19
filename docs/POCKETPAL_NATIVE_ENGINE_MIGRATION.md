@@ -110,6 +110,6 @@ The consolidated branch now contains:
 
 GitHub Actions run `44461202705` successfully built and verified both `librnllama.so` and `libjimmy_pocketpal_jni.so` as ELF64/AArch64 shared libraries, including the MTMD image path. Artifact: `pocketpal-rnllama-arm64-cpu` (41,641,838 bytes). SHA-256: `librnllama.so` = `798e3e022174aeed0bdac768db30e253398e67fc7b1fec716c8dd06167efa6a7`; `libjimmy_pocketpal_jni.so` = `369382294e272ae45ae765cb01dcc15669d416636d173d691aa532d617d4c337`. This is a native-library CI build, not an APK build.
 
-The unit-test-only workflow run `44461541188` passed all 26 tests, including the local-only multimodal coordinator route. The earlier structured runner regression suite also passed in run `44459350163`.
+The unit-test-only workflow run `44462222473` passed after adding a regression test that verifies Vision mode does not expose text-tool schemas. The preceding run `44461541188` also passed the local-only multimodal coordinator route. The earlier structured runner regression suite passed in `44459350163`.
 
 The Kotlin provider and UI cutover have not yet been validated on the physical Exynos device. The final APK build remains deferred until all additions and changes are complete.
