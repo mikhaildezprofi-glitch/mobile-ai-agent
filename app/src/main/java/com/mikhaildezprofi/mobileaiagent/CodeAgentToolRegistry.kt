@@ -37,6 +37,17 @@ internal class CodeAgentToolRegistry(private val workspace: CodeWorkspace) {
                 .put("additionalProperties", false)
         ))
         put(tool(
+            "code_replace_text",
+            "Replace one exact, unique text fragment in a previously read file. Requires the current SHA-256 from code_read_file. Fails without changing the file if the fragment is missing, duplicated, or stale.",
+            JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("path", stringProperty("Relative file path"))
+                .put("expected_sha256", stringProperty("Current SHA-256 returned by code_read_file"))
+                .put("old_text", stringProperty("Exact existing text to replace; must occur exactly once"))
+                .put("new_text", stringProperty("Replacement text")))
+                .put("required", JSONArray().put("path").put("expected_sha256").put("old_text").put("new_text"))
+                .put("additionalProperties", false)
+        ))
+        put(tool(
             "code_write_file",
             "Create a UTF-8 source/configuration file or replace a previously read file using its exact expected_sha256. Writes only to the private Jimmy workspace; never to arbitrary device paths.",
             JSONObject().put("type", "object").put("properties", JSONObject()
@@ -73,6 +84,16 @@ internal class CodeAgentToolRegistry(private val workspace: CodeWorkspace) {
                     relativeDirectory = arguments.optString("directory"),
                     maxResults = arguments.optInt("max_results", 40)
                 )))
+                .toString()
+            "code_replace_text" -> JSONObject()
+                .put("path", arguments.getString("path"))
+                .put("sha256", workspace.replaceText(
+                    relativePath = arguments.getString("path"),
+                    expectedSha256 = arguments.getString("expected_sha256"),
+                    oldText = arguments.getString("old_text"),
+                    newText = arguments.getString("new_text")
+                ))
+                .put("status", "replaced_in_private_workspace")
                 .toString()
             "code_write_file" -> JSONObject()
                 .put("path", arguments.getString("path"))
@@ -111,6 +132,7 @@ internal class CodeAgentToolRegistry(private val workspace: CodeWorkspace) {
             "code_list_files",
             "code_read_file",
             "code_search",
+            "code_replace_text",
             "code_write_file"
         )
     }
