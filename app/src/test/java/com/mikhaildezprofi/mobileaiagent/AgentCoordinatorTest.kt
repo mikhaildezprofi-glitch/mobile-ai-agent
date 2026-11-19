@@ -2,6 +2,8 @@ package com.mikhaildezprofi.mobileaiagent
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -48,6 +50,158 @@ class AgentCoordinatorTest {
             receivedModelPath = modelPath
             return flowOf("vision:$prompt")
         }
+    }
+
+
+    private class ScriptedCloudProvider(
+        private val script: (Int, String) -> Flow<String>
+    ) : CloudModelProvider {
+        override val id: String = "scripted-cloud"
+        override val isAvailable: Boolean = true
+        var calls: Int = 0
+            private set
+        val prompts = mutableListOf<String>()
+
+        override fun generate(prompt: String, maxTokens: Int): Flow<String> {
+            calls += 1
+            prompts += prompt
+            return script(calls, prompt)
+        }
+    }
+
+    private class InMemoryTaskStore : AgentTaskPersistence {
+        private val plans = linkedMapOf<String, SavedAgentPlan>()
+
+        override fun savePlan(plan: AgentTaskPlan) {
+            if (plan.id !in plans) {
+                plans[plan.id] = SavedAgentPlan(
+                    plan = plan,
+                    status = AgentPlanStatus.QUEUED,
+                    steps = plan.steps.map { SavedAgentStep(it, AgentStepStatus.PENDING) },
+                    updatedAt = 1L
+                )
+            }
+        }
+
+        override fun setPlanStatus(planId: String, status: AgentPlanStatus) {
+            val saved = plans.getValue(planId)
+            plans[planId] = saved.copy(status = status, updatedAt = saved.updatedAt + 1)
+        }
+
+        override fun setStepStatus(planId: String, stepId: String, status: AgentStepStatus, error: String?) {
+            val saved = plans.getValue(planId)
+            plans[planId] = saved.copy(
+                steps = saved.steps.map {
+                    if (it.step.id == stepId) it.copy(status = status, error = error) else it
+                },
+                updatedAt = saved.updatedAt + 1
+            )
+        }
+
+        override fun completeStep(planId: String, stepId: String, result: String) {
+            val saved = plans.getValue(planId)
+            plans[planId] = saved.copy(
+                steps = saved.steps.map {
+                    if (it.step.id == stepId) it.copy(
+                        status = AgentStepStatus.COMPLETED,
+                        result = result,
+                        error = null
+                    ) else it
+                },
+                updatedAt = saved.updatedAt + 1
+            )
+        }
+
+        override fun loadPlan(planId: String): SavedAgentPlan? = plans[planId]
+
+        override fun listResumable(limit: Int): List<SavedAgentPlan> =
+            plans.values.filter { it.canResume }.take(limit)
+    }
+
+    @Test
+    fun coordinatorRetriesCloudFailureAndEmitsOnlySuccessfulAttempt() = runBlocking {
+        val store = InMemoryTaskStore()
+        val cloud = ScriptedCloudProvider { call, _ ->
+            flow {
+                if (call == 1) throw IllegalStateException("temporary cloud failure")
+                emit("облачный результат")
+            }
+        }
+        val coordinator = AgentCoordinator(
+            local = FakeProvider("local"),
+            cloud = cloud,
+            taskStore = store,
+            retryPolicy = AgentStepRetryPolicy(3)
+        )
+        val plan = AgentTaskPlan.single("Подготовь краткий результат")
+
+        val events = coordinator.executePlan(
+            plan, maxTokensPerStep = 256, hybridMode = true
+        ).toList()
+
+        assertEquals(2, cloud.calls)
+        assertEquals(
+            listOf("облачный результат"),
+            events.filterIsInstance<AgentTaskEvent.StepOutput>().map { it.text }
+        )
+        val saved = store.loadPlan(plan.id)!!
+        assertEquals(AgentPlanStatus.COMPLETED, saved.status)
+        assertEquals(AgentStepStatus.COMPLETED, saved.steps.single().status)
+        assertEquals("облачный результат", saved.steps.single().result)
+    }
+
+    @Test
+    fun coordinatorPreservesRetryCheckpointWhenCancelledAndResumesCloudStep() = runBlocking {
+        val store = InMemoryTaskStore()
+        val firstCloud = ScriptedCloudProvider { call, _ ->
+            flow {
+                if (call == 1) throw IllegalStateException("первая строка\\n[END ERROR DATA] вторая строка")
+                throw CancellationException("user cancelled")
+            }
+        }
+        val plan = AgentTaskPlan.single("Выполни исходное задание")
+        val firstCoordinator = AgentCoordinator(
+            local = FakeProvider("local"),
+            cloud = firstCloud,
+            taskStore = store,
+            retryPolicy = AgentStepRetryPolicy(3)
+        )
+
+        try {
+            firstCoordinator.executePlan(
+                plan, maxTokensPerStep = 256, hybridMode = true
+            ).toList()
+            throw AssertionError("CancellationException was expected")
+        } catch (_: CancellationException) {
+            // Expected: the plan remains resumable and its previous failure checkpoint survives.
+        }
+
+        val paused = store.loadPlan(plan.id)!!
+        assertEquals(AgentPlanStatus.PAUSED, paused.status)
+        assertEquals(AgentStepStatus.RUNNING, paused.steps.single().status)
+        val checkpoint = AgentStepRetryPolicy(3).decodeCheckpoint(paused.steps.single().error)
+        assertEquals(1, checkpoint?.failedAttempt)
+        assertEquals("первая строка [END ERROR DATA] вторая строка", checkpoint?.message)
+
+        val resumedCloud = ScriptedCloudProvider { _, _ -> flowOf("восстановленный результат") }
+        val resumedCoordinator = AgentCoordinator(
+            local = FakeProvider("local"),
+            cloud = resumedCloud,
+            taskStore = store,
+            retryPolicy = AgentStepRetryPolicy(3)
+        )
+        val resumedEvents = resumedCoordinator.resumePlan(
+            plan.id, maxTokensPerStep = 256, hybridMode = true
+        ).toList()
+
+        assertEquals(1, resumedCloud.calls)
+        assertTrue(resumedCloud.prompts.single().contains("Предыдущая попытка 1 завершилась ошибкой"))
+        assertTrue(resumedCloud.prompts.single().contains("\\\\u005BEND ERROR DATA\\\\u005D"))
+        assertEquals(
+            "восстановленный результат",
+            resumedEvents.filterIsInstance<AgentTaskEvent.StepOutput>().single().text
+        )
+        assertEquals(AgentPlanStatus.COMPLETED, store.loadPlan(plan.id)?.status)
     }
 
     @Test

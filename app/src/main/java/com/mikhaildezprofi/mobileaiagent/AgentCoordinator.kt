@@ -355,8 +355,10 @@ class AgentCoordinator(
                         emit(AgentTaskEvent.StepCompleted(step, results.getValue(step.id)))
                         return@forEachIndexed
                     }
+                    val savedStep = saved?.steps?.firstOrNull { it.step.id == step.id }
                     activeStepId = step.id
-                    taskStore?.setStepStatus(plan.id, step.id, AgentStepStatus.RUNNING)
+                    // Preserve an interrupted retry checkpoint while marking the step RUNNING.
+                    taskStore?.setStepStatus(plan.id, step.id, AgentStepStatus.RUNNING, savedStep?.error)
                     emit(AgentTaskEvent.StepStarted(step, index + 1, plan.steps.size))
                     val dependencyContext = step.dependsOn.joinToString("\n\n") { dependencyId ->
                         val dependency = plan.steps.first { it.id == dependencyId }
@@ -374,11 +376,9 @@ class AgentCoordinator(
                         append("Выполни только это задание. Не утверждай, что внешние действия выполнены, если они не запускались и не проверялись.")
                     }
                     var completed = ""
-                    val persistedCheckpoint = saved?.steps?.firstOrNull { it.step.id == step.id }
-                        ?.error?.let { Regex("^Попытка (\\d+)/\\d+: (.*)$").find(it) }
-                    var attempt = (persistedCheckpoint?.groupValues?.get(1)?.toIntOrNull()?.plus(1) ?: 1)
-                        .coerceAtLeast(1)
-                    var lastError: Exception? = persistedCheckpoint?.groupValues?.get(2)
+                    val persistedCheckpoint = retryPolicy.decodeCheckpoint(savedStep?.error)
+                    var attempt = (persistedCheckpoint?.failedAttempt?.plus(1) ?: 1).coerceAtLeast(1)
+                    var lastError: Exception? = persistedCheckpoint?.message
                         ?.takeIf(String::isNotBlank)?.let(::IllegalStateException)
                     while (attempt <= retryPolicy.maxAttempts) {
                         activeAttempt = attempt
