@@ -108,6 +108,67 @@ class GitHubApiClientTest {
         assertTrue(extracted.contains("second line"))
     }
 
+    @Test
+    fun rejectsUnsafeAndOverlappingDeletionPathsBeforeNetwork() {
+        var requests = 0
+        val client = GitHubApiClient(Token()) { url ->
+            requests++
+            Response(url, 500, "{}")
+        }
+
+        try {
+            client.commitWorkspaceChanges(
+                branch = "code-agent/test",
+                expectedHeadSha = "a".repeat(40),
+                files = listOf(GitHubWorkspaceFile("README.md", "content")),
+                message = "test",
+                deletePaths = listOf("README.md")
+            )
+            throw AssertionError("Expected overlapping path rejection")
+        } catch (_: IllegalArgumentException) {
+            assertEquals(0, requests)
+        }
+
+        try {
+            client.commitWorkspaceChanges(
+                branch = "code-agent/test",
+                expectedHeadSha = "a".repeat(40),
+                files = emptyList(),
+                message = "test",
+                deletePaths = listOf("../outside.txt")
+            )
+            throw AssertionError("Expected traversal rejection")
+        } catch (_: IllegalArgumentException) {
+            assertEquals(0, requests)
+        }
+    }
+
+    @Test
+    fun rejectsLogArchivesWithTooManyEntries() {
+        val entries = (1..51).map { "job/$it.txt" to "x" }
+        val client = GitHubApiClient(Token()) { url -> Response(url, 200, "{}") }
+
+        try {
+            client.extractJobLogArchive(zipOf(*entries.toTypedArray()))
+            throw AssertionError("Expected entry-count limit")
+        } catch (error: IllegalArgumentException) {
+            assertTrue(error.message.orEmpty().contains("слишком много"))
+        }
+    }
+
+    @Test
+    fun rejectsOversizedIndividualLogEntry() {
+        val largeText = "x".repeat(2 * 1024 * 1024 + 1)
+        val client = GitHubApiClient(Token()) { url -> Response(url, 200, "{}") }
+
+        try {
+            client.extractJobLogArchive(zipOf("job/large.txt" to largeText))
+            throw AssertionError("Expected entry-size limit")
+        } catch (error: IllegalStateException) {
+            assertTrue(error.message.orEmpty().contains("размер"))
+        }
+    }
+
     private fun zipOf(vararg entries: Pair<String, String>): ByteArray {
         val output = ByteArrayOutputStream()
         ZipOutputStream(output).use { zip ->
