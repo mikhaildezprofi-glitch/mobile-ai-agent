@@ -8,7 +8,7 @@ import org.json.JSONObject
  * chat parser; no JSON-in-prose envelope is required on this path.
  */
 internal class PocketPalStructuredAgentRunner(
-    private val bridge: PocketPalNativeBridge,
+    private val bridge: PocketPalGenerationEngine,
     private val registry: AgentTalentRegistry = AgentTalentRegistry.default(),
     private val maxToolCalls: Int = MAX_TOOL_CALLS
 ) {
@@ -37,12 +37,14 @@ internal class PocketPalStructuredAgentRunner(
                 return result
             }
 
+            val callIds = result.toolCalls.mapIndexed { index, call ->
+                call.id.ifBlank { "jimmy_call_${executedCalls + index + 1}" }
+            }
             val assistantCalls = JSONArray()
             result.toolCalls.forEachIndexed { index, call ->
-                val id = call.id.ifBlank { "jimmy_call_${executedCalls + index + 1}" }
                 assistantCalls.put(
                     JSONObject()
-                        .put("id", id)
+                        .put("id", callIds[index])
                         .put("type", "function")
                         .put("function", JSONObject()
                             .put("name", call.name)
@@ -57,7 +59,7 @@ internal class PocketPalStructuredAgentRunner(
             )
 
             result.toolCalls.forEachIndexed { index, call ->
-                val id = call.id.ifBlank { "jimmy_call_${executedCalls + 1}" }
+                val id = callIds[index]
                 val toolResult = if (executedCalls < maxToolCalls) {
                     val arguments = runCatching { JSONObject(call.argumentsJson) }
                         .getOrElse { JSONObject() }
