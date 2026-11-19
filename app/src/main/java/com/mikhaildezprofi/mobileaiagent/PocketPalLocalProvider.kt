@@ -26,6 +26,18 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Ag
     override val isAvailable: Boolean
         get() = currentModelFile()?.let { it.isFile && it.canRead() && it.length() > 0L } == true
 
+    private fun currentCodeWorkspace(): CodeWorkspace {
+        val base = File(appContext.filesDir, "code-workspace").canonicalFile
+        val selectedName = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+            .getString("active_code_project", null)
+            ?.takeIf { it.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")) }
+        val selected = selectedName?.let { File(base, it).canonicalFile } ?: base
+        require(selected == base || selected.path.startsWith(base.path + File.separator)) {
+            "Выбранный проект находится за пределами рабочей области."
+        }
+        return CodeWorkspace(selected)
+    }
+
     private fun currentModelFile(): File? {
         val preferences = appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
         val savedText = preferences.getString("text_model_path", null)?.let(::File)
@@ -179,7 +191,7 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Ag
                         if (delta.isNotEmpty()) trySend(delta)
                     }
                 }
-                val codeWorkspace = CodeWorkspace(File(appContext.filesDir, "code-workspace"))
+                val codeWorkspace = currentCodeWorkspace()
                 val codeTools = CodeAgentToolRegistry(codeWorkspace)
                 val result = PocketPalStructuredAgentRunner(
                     active,
