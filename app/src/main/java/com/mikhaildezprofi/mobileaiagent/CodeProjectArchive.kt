@@ -39,6 +39,15 @@ internal object CodeProjectArchive {
                     val segments = normalized.split('/')
                     require(segments.size <= MAX_DEPTH) { "Архив содержит слишком глубокий путь." }
                     if (segments.any { it in EXCLUDED_DIRECTORIES }) {
+                        val discard = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            val count = zip.read(discard)
+                            if (count < 0) break
+                            totalBytes += count
+                            require(totalBytes <= MAX_TOTAL_BYTES) {
+                                "Распакованный проект превышает лимит $MAX_TOTAL_BYTES байт."
+                            }
+                        }
                         zip.closeEntry()
                         continue
                     }
@@ -93,7 +102,9 @@ internal object CodeProjectArchive {
         var count = 0
         var totalBytes = 0L
         ZipOutputStream(output.buffered()).use { zip ->
-            project.walkTopDown().forEach { file ->
+            project.walkTopDown()
+                .onEnter { directory -> directory == project || directory.name !in EXCLUDED_DIRECTORIES }
+                .forEach { file ->
                 if (file.isDirectory) {
                     if (file != project && file.name in EXCLUDED_DIRECTORIES) return@forEach
                     return@forEach
