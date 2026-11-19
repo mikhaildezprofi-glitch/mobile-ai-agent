@@ -71,6 +71,7 @@ import com.mikhaildezprofi.mobileaiagent.CodeWorkspace
 import com.mikhaildezprofi.mobileaiagent.SafeDocumentReader
 import com.mikhaildezprofi.mobileaiagent.GeminiApiKeyStore
 import com.mikhaildezprofi.mobileaiagent.GitHubTokenStore
+import com.mikhaildezprofi.mobileaiagent.GitHubApiClient
 import com.mikhaildezprofi.mobileaiagent.GeminiCloudProvider
 import com.mikhaildezprofi.mobileaiagent.InstalledGeminiBridge
 import com.mikhaildezprofi.mobileaiagent.AgentRuntimeConfig
@@ -292,6 +293,8 @@ fun MainScreen() {
     var githubTokenDraft by remember { mutableStateOf("") }
     var githubTokenConfigured by remember { mutableStateOf(githubTokenStore.hasToken()) }
     var githubTokenStatus by remember { mutableStateOf(if (githubTokenStore.hasToken()) "GitHub-токен сохранён в Android Keystore." else "GitHub не подключён.") }
+    var githubConnectionBusy by remember { mutableStateOf(false) }
+    var githubConnectionStatus by remember { mutableStateOf("") }
     var geminiAppInstalled by remember { mutableStateOf(InstalledGeminiBridge.isInstalled(appContext)) }
     var geminiAppStatus by remember { mutableStateOf("") }
     var geminiApiKeyDraft by remember { mutableStateOf("") }
@@ -2029,6 +2032,30 @@ fun MainScreen() {
                         ) { Text("Удалить токен") }
                     }
                     Text(githubTokenStatus, style = MaterialTheme.typography.bodySmall)
+                    TextButton(
+                        enabled = githubTokenConfigured && !githubConnectionBusy,
+                        onClick = {
+                            githubConnectionBusy = true
+                            githubConnectionStatus = "Проверка доступа к репозиторию…"
+                            scope.launch {
+                                try {
+                                    val info = withContext(Dispatchers.IO) {
+                                        GitHubApiClient(githubTokenStore).validateConnection()
+                                    }
+                                    githubConnectionStatus = "Подключение подтверждено: ${info.fullName}, базовая ветка ${info.defaultBranch}."
+                                } catch (error: Exception) {
+                                    githubConnectionStatus = "Проверка не пройдена: ${error.message ?: error.javaClass.simpleName}"
+                                } finally {
+                                    githubConnectionBusy = false
+                                }
+                            }
+                        }
+                    ) {
+                        Text(if (githubConnectionBusy) "Проверяем GitHub…" else "Проверить подключение GitHub")
+                    }
+                    if (githubConnectionStatus.isNotBlank()) {
+                        Text(githubConnectionStatus, style = MaterialTheme.typography.bodySmall)
+                    }
                     HorizontalDivider()
                     Text("Установленное приложение Gemini", fontWeight = FontWeight.SemiBold)
                     Text(
