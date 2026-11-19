@@ -684,10 +684,12 @@ fun MainScreen() {
                             }
                         }
                     }
-                    preferences.edit().apply {
-                        putString("model_path", modelFile.absolutePath)
-                        if (!isVisionModel) putString("text_model_path", modelFile.absolutePath)
+                    val modelEditor = preferences.edit()
+                        .putString("model_path", modelFile.absolutePath)
+                    if (!isVisionModel) {
+                        modelEditor.putString("text_model_path", modelFile.absolutePath)
                     }
+                    modelEditor.apply()
                     visionRevision++
                     modelReady = if (isVisionModel) {
                         activeEngine?.state?.value is InferenceEngine.State.ModelReady
