@@ -6,14 +6,12 @@ on:
       - 'integration/agent-consolidated-*'
     paths:
       - 'app/**'
-      - 'llama/**'
       - 'gradle/**'
       - 'third_party/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
       - 'gradle.properties'
       - 'gradlew'
-      - 'scripts/patch-llama-diagnostics.py'
       - '.github/workflows/agent-unit-tests.yml'
   workflow_dispatch:
 
@@ -30,14 +28,6 @@ jobs:
     steps:
       - name: Checkout Jimmy repository
         uses: actions/checkout@v4
-
-      - name: Checkout pinned llama.cpp Android engine
-        uses: actions/checkout@v4
-        with:
-          repository: ggml-org/llama.cpp
-          ref: 3de52ac38818978d6da8f386eda43a856e53714a
-          path: third_party/llama.cpp
-          fetch-depth: 1
 
       - name: Checkout pinned PocketPal llama.rn native core
         uses: actions/checkout@v4
@@ -71,10 +61,6 @@ jobs:
           set -e
           if [ "$sdk_status" -ne 0 ]; then exit "$sdk_status"; fi
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.13113456" "cmake;3.31.6"
-          sed -i 's/listOf("arm64-v8a", "x86_64")/listOf("arm64-v8a")/' third_party/llama.cpp/examples/llama.android/lib/build.gradle.kts
-
-      - name: Patch llama.cpp native diagnostics
-        run: python3 scripts/patch-llama-diagnostics.py
 
       - name: Run unit tests only
         run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
