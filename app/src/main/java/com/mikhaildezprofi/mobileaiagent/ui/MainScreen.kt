@@ -684,7 +684,10 @@ fun MainScreen() {
                             }
                         }
                     }
-                    preferences.edit().putString("model_path", modelFile.absolutePath).apply()
+                    preferences.edit().apply {
+                        putString("model_path", modelFile.absolutePath)
+                        if (!isVisionModel) putString("text_model_path", modelFile.absolutePath)
+                    }
                     visionRevision++
                     modelReady = if (isVisionModel) {
                         activeEngine?.state?.value is InferenceEngine.State.ModelReady
@@ -761,7 +764,8 @@ fun MainScreen() {
         if (projectorFile != null) {
             editor.putString("vision_mmproj_path", projectorFile.absolutePath)
         } else {
-            editor.remove("vision_mmproj_path")
+            editor.putString("text_model_path", modelFile.absolutePath)
+                .remove("vision_mmproj_path")
         }
         check(editor.commit()) { "Не удалось сохранить выбранную модель." }
         modelReady = if (projectorFile != null) {
