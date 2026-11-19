@@ -1049,6 +1049,8 @@ fun MainScreen() {
                             .putString("vision_model_path", assets.model.absolutePath)
                             .putString("vision_mmproj_path", assets.projector.absolutePath)
                             .apply()
+                        visionReady = true
+                        visionRevision++
                         visionDownloadStatus = "Файлы Vision проверены. Загружаю PocketPal…"
 
                         status = if (hasVideoAttachment) {
