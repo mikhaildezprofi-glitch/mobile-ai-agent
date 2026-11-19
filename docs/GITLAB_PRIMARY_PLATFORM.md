@@ -14,7 +14,7 @@ Workflow `.github/workflows/gitlab-source-sync.yml` в GitHub:
 - получает публичный GitLab main и сравнивает SHA;
 - перед заменой отличающегося GitHub main сохраняет прежнюю вершину в `archive/github-main-before-sync-<run-id>`;
 - синхронизирует GitHub main и `sync/current` с точным GitLab SHA;
-- проверяет наличие `gradle/libs.versions.toml` и `scripts/patch-llama-diagnostics.py`;
+- проверяет наличие Gradle version catalog и необходимых Android build-файлов;
 - запускает Android build через `workflow_dispatch`, только если для SHA ещё нет релиза или уже выполненной/активной сборки.
 
 Это односторонняя синхронизация. GitHub не является альтернативным источником исходников.
@@ -23,9 +23,9 @@ Workflow `.github/workflows/gitlab-source-sync.yml` в GitHub:
 
 Workflow `.github/workflows/android-build.yml`:
 
-1. Проверяет исходники и загружает зафиксированный llama.cpp в `third_party/llama.cpp`.
+1. Проверяет исходники и загружает зафиксированный PocketPal `llama.rn` native core в `third_party/pocketpal-llama-rn`.
 2. Устанавливает JDK 17, Gradle, Android SDK, NDK и CMake.
-3. Применяет патч диагностики llama.cpp.
+3. Собирает PocketPal JNI/MTMD native core без React Native и JSI.
 4. Запускает ` :app:testDebugUnitTest ` перед APK сборкой.
 5. Собирает ` :app:assembleDebug `.
 6. Создаёт `build-metadata.json` и SHA-256.
