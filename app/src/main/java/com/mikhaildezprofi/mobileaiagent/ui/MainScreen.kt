@@ -66,6 +66,8 @@ import com.mikhaildezprofi.mobileaiagent.ImageAttachmentSource
 import com.mikhaildezprofi.mobileaiagent.ImageAttachmentStager
 import com.mikhaildezprofi.mobileaiagent.VideoFrameExtractor
 import com.mikhaildezprofi.mobileaiagent.AgentToolRegistry
+import com.mikhaildezprofi.mobileaiagent.CodeProjectArchive
+import com.mikhaildezprofi.mobileaiagent.CodeWorkspace
 import com.mikhaildezprofi.mobileaiagent.SafeDocumentReader
 import com.mikhaildezprofi.mobileaiagent.GeminiApiKeyStore
 import com.mikhaildezprofi.mobileaiagent.GeminiCloudProvider
@@ -317,6 +319,12 @@ fun MainScreen() {
     var showDiagnosticsDialog by remember { mutableStateOf(false) }
     var showCapabilitiesDialog by remember { mutableStateOf(false) }
     var showTaskHistoryDialog by remember { mutableStateOf(false) }
+    var showCodeProjectDialog by remember { mutableStateOf(false) }
+    var codeProjectName by remember {
+        mutableStateOf(appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+            .getString("active_code_project", "project") ?: "project")
+    }
+    var codeProjectStatus by remember { mutableStateOf("Импортируйте ZIP-архив проекта в приватную рабочую область Джимми.") }
     var selectedTaskPlan by remember { mutableStateOf<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan?>(null) }
     var planPendingDeletion by remember { mutableStateOf<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan?>(null) }
     var agentTaskHistory by remember { mutableStateOf<List<com.mikhaildezprofi.mobileaiagent.SavedAgentPlan>>(emptyList()) }
@@ -398,6 +406,58 @@ fun MainScreen() {
                 status = "Данные восстановлены. Gemini API-ключ нужно настроить заново; модель Qwen можно выбрать из Download."
             }.onFailure { error ->
                 status = "Не удалось восстановить резервную копию: ${error.message ?: "ошибка"}"
+            }
+        }
+    }
+
+    val codeProjectImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val inputStream = appContext.contentResolver.openInputStream(uri)
+                        ?: error("Не удалось открыть выбранный ZIP-архив.")
+                    inputStream.use {
+                        CodeProjectArchive.importZip(
+                            CodeWorkspace(File(appContext.filesDir, "code-workspace")),
+                            codeProjectName.trim(),
+                            it
+                        )
+                    }
+                }
+            }.onSuccess { imported ->
+                appContext.getSharedPreferences("agent_settings", Context.MODE_PRIVATE)
+                    .edit().putString("active_code_project", imported.projectName).apply()
+                codeProjectName = imported.projectName
+                codeProjectStatus = "Импортирован проект «${imported.projectName}»: ${imported.filesImported} файлов, ${imported.bytesImported / 1024} КБ."
+                status = codeProjectStatus
+            }.onFailure { error ->
+                codeProjectStatus = "Ошибка импорта: ${error.message ?: error.javaClass.simpleName}"
+                status = codeProjectStatus
+            }
+        }
+    }
+    val codeProjectExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null) scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val outputStream = appContext.contentResolver.openOutputStream(uri, "w")
+                        ?: error("Не удалось создать ZIP-файл.")
+                    CodeProjectArchive.exportZip(
+                        CodeWorkspace(File(appContext.filesDir, "code-workspace")),
+                        codeProjectName.trim(),
+                        outputStream
+                    )
+                }
+            }.onSuccess { count ->
+                codeProjectStatus = "Экспортирован проект «${codeProjectName.trim()}»: $count файлов."
+                status = codeProjectStatus
+            }.onFailure { error ->
+                codeProjectStatus = "Ошибка экспорта: ${error.message ?: error.javaClass.simpleName}"
+                status = codeProjectStatus
             }
         }
     }
@@ -1268,6 +1328,15 @@ fun MainScreen() {
                     }
                 )
                 NavigationDrawerItem(
+                    label = { Text("Проекты Code Agent") },
+                    selected = false,
+                    icon = { Icon(Icons.Default.BugReport, contentDescription = null) },
+                    onClick = {
+                        showCodeProjectDialog = true
+                        scope.launch { drawerState.close() }
+                    }
+                )
+                NavigationDrawerItem(
                     label = { Text("Настройки") },
                     selected = false,
                     icon = { Icon(Icons.Default.Settings, contentDescription = null) },
@@ -1560,7 +1629,8 @@ fun MainScreen() {
             localReady = modelReady,
             cloudReady = geminiKeyConfigured && runtimeConfig.geminiApiEnabled,
             fileReaderReady = runtimeConfig.documentReadingEnabled,
-            visionReady = visionReady && runtimeConfig.visionInferenceEnabled
+            visionReady = visionReady && runtimeConfig.visionInferenceEnabled,
+            codeWorkspaceReady = modelReady
         ).all()
         AlertDialog(
             onDismissRequest = { showCapabilitiesDialog = false },
@@ -1674,6 +1744,49 @@ fun MainScreen() {
                     }
                     TextButton(onClick = { selectedTaskPlan = null }) { Text("Закрыть") }
                 }
+            }
+        )
+    }
+
+    if (showCodeProjectDialog) {
+        AlertDialog(
+            onDismissRequest = { showCodeProjectDialog = false },
+            title = { Text("Проекты Code Agent") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = codeProjectName,
+                        onValueChange = { codeProjectName = it },
+                        label = { Text("Имя проекта") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        "Проекты хранятся в приватной папке приложения. Импортируйте ZIP, затем попросите Джимми изучить или изменить файлы проекта.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(codeProjectStatus, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        enabled = !busy && codeProjectName.isNotBlank(),
+                        onClick = {
+                            codeProjectImportLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                        }
+                    ) { Text("Импорт ZIP") }
+                    TextButton(
+                        enabled = !busy && codeProjectName.isNotBlank(),
+                        onClick = {
+                            codeProjectExportLauncher.launch("${codeProjectName.trim()}.zip")
+                        }
+                    ) { Text("Экспорт ZIP") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCodeProjectDialog = false }) { Text("Закрыть") }
             }
         )
     }
