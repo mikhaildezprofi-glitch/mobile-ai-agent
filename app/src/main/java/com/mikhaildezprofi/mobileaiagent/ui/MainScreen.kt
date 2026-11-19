@@ -1161,11 +1161,11 @@ fun MainScreen() {
                             "Не удалось получить изображения или кадры из выбранного видео."
                         }
                         val videoNote = if (hasVideoAttachment) {
-                            "\n\nВидео представлено \${extractedVideoFrames.size} ключевыми кадрами. Не делай выводов о промежутках между кадрами."
+                            "\n\nВидео представлено ${extractedVideoFrames.size} ключевыми кадрами. Не делай выводов о промежутках между кадрами."
                         } else ""
                         val omittedImages = imageSources.size - selectedImageSources.size
                         val imageLimitNote = if (omittedImages > 0) {
-                            "\n\nДля одного запроса выбраны первые \${selectedImageSources.size} фото; ещё $omittedImages фото пропущено из-за лимита обработки."
+                            "\n\nДля одного запроса выбраны первые ${selectedImageSources.size} фото; ещё $omittedImages фото пропущено из-за лимита обработки."
                         } else ""
                         stagedImages = ImageAttachmentStager.stage(appContext, visualSources)
                         withContext(Dispatchers.IO) {
