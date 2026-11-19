@@ -29,6 +29,7 @@ class GitHubApiClientTest {
         override fun disconnect() {}
         override fun usingProxy() = false
         override fun getResponseCode() = status
+        override fun setRequestMethod(method: String) { this.method = method }
         override fun getInputStream() = ByteArrayInputStream(body.toByteArray(Charsets.UTF_8))
         override fun getErrorStream() =
             if (status >= 400) ByteArrayInputStream(body.toByteArray(Charsets.UTF_8)) else null
