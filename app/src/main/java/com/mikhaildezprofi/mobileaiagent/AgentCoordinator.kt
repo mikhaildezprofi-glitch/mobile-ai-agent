@@ -103,7 +103,12 @@ class AgentCoordinator(
         val task = taskOverride ?: classify(prompt)
         val taskId = task.name.lowercase()
         val cloudPreferred = routing.prefersCloud(taskId)
-        val localOnly = taskId in routing.localOnlyTasks
+        val codeWorkspaceTask = task == AgentTaskKind.CODE && listOf(
+            "файл", "проект", "исходник", "репозитор", "кодовой базе",
+            "создай файл", "измени файл", "отредактируй", "исправь в проекте",
+            "добавь в проект", "рабочей области"
+        ).any(prompt.lowercase()::contains)
+        val localOnly = taskId in routing.localOnlyTasks || codeWorkspaceTask
         val cloudAllowed = allowCloud && hybridMode && cloudPreferred && !localOnly &&
             task != AgentTaskKind.CURRENT_INFORMATION
 
