@@ -179,7 +179,13 @@ internal class PocketPalLocalProvider(context: Context) : AgentModelProvider, Ag
                         if (delta.isNotEmpty()) trySend(delta)
                     }
                 }
-                val result = PocketPalStructuredAgentRunner(active, enableTools = enableTools).generate(
+                val codeWorkspace = CodeWorkspace(File(appContext.filesDir, "code-workspace"))
+                val codeTools = CodeAgentToolRegistry(codeWorkspace)
+                val result = PocketPalStructuredAgentRunner(
+                    active,
+                    enableTools = enableTools,
+                    codeTools = codeTools
+                ).generate(
                     messages = messages,
                     maxTokens = maxTokens.coerceIn(64, 8192),
                     temperature = temperature.toFloat().coerceIn(0f, 2f),
