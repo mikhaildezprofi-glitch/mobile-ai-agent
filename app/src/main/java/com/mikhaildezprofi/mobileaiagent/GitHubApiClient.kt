@@ -104,11 +104,12 @@ class GitHubApiClient(
         branch: String,
         expectedHeadSha: String,
         files: List<GitHubWorkspaceFile>,
-        message: String
+        message: String,
+        deletePaths: List<String> = emptyList()
     ): GitHubCommitResult {
         require(isAgentBranch(branch)) { "Запись разрешена только в code-agent/*." }
         require(expectedHeadSha.matches(Regex("[a-fA-F0-9]{40}"))) { "Некорректный SHA исходного коммита." }
-        require(files.isNotEmpty() && files.size <= MAX_FILES) { "Количество файлов должно быть от 1 до $MAX_FILES." }
+        require(files.size + deletePaths.size in 1..MAX_FILES) { "Количество изменений должно быть от 1 до $MAX_FILES." }
         require(message.isNotBlank() && message.length <= 200) { "Некорректное сообщение коммита." }
 
         val normalized = files.map { file ->
@@ -119,6 +120,13 @@ class GitHubApiClient(
         }
         require(normalized.map { it.first }.distinct().size == normalized.size) {
             "В наборе есть повторяющиеся пути."
+        }
+        val normalizedDeletes = deletePaths.map(::normalizeWorkspacePath)
+        require(normalizedDeletes.distinct().size == normalizedDeletes.size) {
+            "В списке удаления есть повторяющиеся пути."
+        }
+        require(normalizedDeletes.none { path -> normalized.any { it.first == path } }) {
+            "Нельзя одновременно изменить и удалить один файл."
         }
         require(normalized.sumOf { it.second.size.toLong() } <= MAX_TOTAL_BYTES) {
             "Общий размер изменений превышает допустимый лимит."
@@ -153,6 +161,10 @@ class GitHubApiClient(
                     .put("sha", blob.getString("sha"))
             )
         }
+        normalizedDeletes.forEach { path ->
+            // A null SHA tells GitHub's Git Trees API to remove this path.
+            treeEntries.put(JSONObject().put("path", path).put("sha", JSONObject.NULL))
+        }
 
         val tree = request(
             "POST",
@@ -175,7 +187,7 @@ class GitHubApiClient(
             "/repos/$owner/$repository/git/refs/heads/${encodeRef(branch)}",
             JSONObject().put("sha", commitSha).put("force", false)
         )
-        return GitHubCommitResult(branch, commitSha, normalized.size)
+        return GitHubCommitResult(branch, commitSha, normalized.size + normalizedDeletes.size)
     }
 
     fun dispatchUnitTests(branch: String) {
